@@ -4,7 +4,7 @@ stream_route_handler is tcp and udp handler, one instance handler different prot
 ## clone the project
 ```bash
 
-git clone --recursive git://github.com/foo/bar.git
+git clone --recursive https://github.com/Taymindis/stream_route_handler.git
 
 ```
 

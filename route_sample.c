@@ -1,10 +1,10 @@
-# stream_route_handler
-stream_route_handler is tcp and udp handler, one instance handler different protocol and port at one time
 
-
-
-## Example to run
-```c
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include "stream_rt_handler.h"
 
 void read_data(srh_request_t *req);
 void read_data(srh_request_t *req) {
@@ -28,5 +28,3 @@ int main(void) {
 
   return 0;
 }
-
-```

@@ -1,0 +1,3 @@
+[submodule "lock-free-stack-and-queue"]
+	path = lock-free-stack-and-queue
+	url = https://github.com/Taymindis/lock-free-stack-and-queue.git

@@ -40,7 +40,7 @@ void read_data(srh_request_t *req);
 void read_data(srh_request_t *req) {
   char *a = "CAUSE ERROR FREE INVALID";
 
-  if (strncmp( (char*)req->in_buff->start, "ERROR", 3) == 0) {
+  if (strncmp( (char*)req->in_buff->start, "ERROR", 5) == 0) {
     free(a);
   }
   // printf("%d,  %.*s\n", i++, (int) (req->in_buff->end - req->in_buff->start), req->in_buff->start);

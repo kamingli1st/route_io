@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 project(stream_rt_handler)
 
-set(PROJNAME stream_rt_handler)
+set(PROJNAME srh)
 
 IF (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 SET(CMAKE_INSTALL_INCLUDEDIR /usr/local/include)

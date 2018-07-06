@@ -7,13 +7,13 @@ IF (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 SET(CMAKE_INSTALL_INCLUDEDIR /usr/local/include)
 ENDIF(NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 
-include_directories(lock-free-stack-and-queue /usr/local/include)
+include_directories(/usr/local/include)
 
-file(GLOB_RECURSE sources lock-free-stack-and-queue/lfqueue/lfqueue.c  lock-free-stack-and-queue/lfqueue/lfqueue.h stream_rt_handler.c stream_rt_handler.h)
-file(GLOB_RECURSE example_test lock-free-stack-and-queue/lfqueue/lfqueue.c  lock-free-stack-and-queue/lfqueue/lfqueue.h stream_rt_handler.c stream_rt_handler.h route_sample.c)
+file(GLOB_RECURSE sources stream_rt_handler.c stream_rt_handler.h)
+file(GLOB_RECURSE example_test stream_rt_handler.c stream_rt_handler.h route_sample.c)
 
 add_executable(route_handler ${example_test})
-target_link_libraries(route_handler PUBLIC pthread atomic)
+target_link_libraries(route_handler PUBLIC pthread lfqueue)
 
 
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -Wall -Wstrict-prototypes -Wmissing-prototypes")
@@ -25,10 +25,10 @@ SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wsign-compare -pedantic")
 ## packaging ##################################################################
 ###############################################################################
 add_library(${PROJNAME}.static STATIC ${sources})
-target_link_libraries(${PROJNAME}.static pthread atomic)
+target_link_libraries(${PROJNAME}.static pthread lfqueue)
 set_target_properties(${PROJNAME}.static PROPERTIES OUTPUT_NAME ${PROJNAME})
 add_library(${PROJNAME} SHARED ${sources})
-target_link_libraries(${PROJNAME} pthread atomic)
+target_link_libraries(${PROJNAME} pthread lfqueue)
 
 
 # link_directories(/usr/local/lib /usr/lib)

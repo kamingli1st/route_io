@@ -25,6 +25,17 @@ sudo make install
 ```
 
 
+
+## Uninstallation
+
+```bash
+cd build
+
+sudo make uninstall
+
+```
+
+
 ## Example to run
 ```c
 

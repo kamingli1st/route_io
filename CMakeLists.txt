@@ -46,7 +46,7 @@ install(TARGETS ${PROJNAME} EXPORT ${PROJNAME}
     LIBRARY DESTINATION lib${LIB_SUFFIX}
     # RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
-install(FILES stream_rt_handler.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/srh)
+install(FILES stream_rt_handler.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 install(CODE "execute_process(COMMAND ldconfig)")
 

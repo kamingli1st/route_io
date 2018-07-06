@@ -1,7 +1,12 @@
 # stream_route_handler
 stream_route_handler is tcp and udp handler, one instance handler different protocol and port at one time
 
+## clone the project
+```bash
 
+git clone --recursive git://github.com/foo/bar.git
+
+```
 
 ## Example to run
 ```c

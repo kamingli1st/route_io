@@ -1,12 +1,9 @@
 # stream_route_handler
 stream_route_handler is tcp and udp handler, one instance handler different protocol and port at one time
 
-## clone the project
-```bash
+## Prerequisition Installed
 
-git clone --recursive https://github.com/Taymindis/stream_route_handler.git
-
-```
+lock-free-queue-and-stack -- https://github.com/Taymindis/lock-free-stack-and-queue.git
 
 
 ## Installation

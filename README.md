@@ -8,6 +8,23 @@ git clone --recursive https://github.com/Taymindis/stream_route_handler.git
 
 ```
 
+
+## Installation
+
+```bash
+mkdir build
+
+cd build
+
+cmake ..
+
+make
+
+sudo make install
+
+```
+
+
 ## Example to run
 ```c
 

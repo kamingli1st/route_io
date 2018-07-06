@@ -50,6 +50,15 @@ install(FILES stream_rt_handler.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/srh)
 
 install(CODE "execute_process(COMMAND ldconfig)")
 
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+    IMMEDIATE @ONLY)
+
+add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+
 set(CPACK_PACKAGE_NAME "stream_rt_handler")
 set(CPACK_PACKAGE_VERSION "1.0.0")
 

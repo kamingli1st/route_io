@@ -16,7 +16,8 @@ void init_logger_in_instance(void *arg) {
     fprintf(stderr, "%s\n", "start instance");
     fprintf(stderr, "%s\n", "init logging");
     auto rotating = std::make_shared<spdlog::sinks::rotating_file_sink_mt> ("mylog.log", 1024 * 1024, 5);
-    file_logger = spdlog::create_async("my_logger", rotating, 8192);
+    file_logger = spdlog::create_async("my_logger", rotating, 8192,
+        spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::milliseconds{10}/*flush interval*/, nullptr);
 }
 
 void read_handler(srh_request_t *req) {
@@ -28,7 +29,7 @@ void read_handler(srh_request_t *req) {
 
     if (strncmp( (char*)req->in_buff->start, "log ", 4) == 0) {
         file_logger->info("%.*s", (int) (req->in_buff->end - req->in_buff->start), req->in_buff->start);
-        file_logger->flush();
+        // file_logger->flush();
     }
     srh_write_output_buffer_l(req, req->in_buff->start, (req->in_buff->end - req->in_buff->start));
 }

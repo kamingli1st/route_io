@@ -44,7 +44,7 @@ void read_data(srh_request_t *req) {
     free(a);
   }
   // printf("%d,  %.*s\n", i++, (int) (req->in_buff->end - req->in_buff->start), req->in_buff->start);
-  srh_set_output_buffer_l(req, req->in_buff->start, (req->in_buff->end - req->in_buff->start));
+  srh_write_output_buffer_l(req, req->in_buff->start, (req->in_buff->end - req->in_buff->start));
   // printf("%d,  %.*s\n", i++, (int) (req->out_buff->end - req->out_buff->start), req->out_buff->start);
 }
 

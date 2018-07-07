@@ -57,6 +57,7 @@ rt;\
 rt;}
 
 typedef void (*srh_signal_handler_pt)(int);
+
 static struct sigaction sa;
 static int  has_init_signal = 0;
 static int setnonblocking(int fd);
@@ -83,7 +84,7 @@ srh_do_close(int fd) {
 }
 
 void
-srh_set_output_buffer(srh_request_t *req, u_char* output) {
+srh_write_output_buffer(srh_request_t *req, u_char* output) {
   size_t outsz = SRH_STRLEN(output);
   if (outsz == 0) {
     return ;
@@ -105,7 +106,7 @@ srh_set_output_buffer(srh_request_t *req, u_char* output) {
 }
 
 void
-srh_set_output_buffer_l(srh_request_t *req, u_char* output, size_t len) {
+srh_write_output_buffer_l(srh_request_t *req, u_char* output, size_t len) {
   if (len == 0) {
     return ;
   }
@@ -409,6 +410,10 @@ STREAM_RESTART:
   }
 
   if (ch_pid == 0) {
+    if(instance->init_handler) {
+      instance->init_handler(instance->init_arg);
+    }
+
     while ((r = srh_run_epoll(instance)) == 0) /*loop*/;
 
     if (r == -1) {
@@ -428,7 +433,7 @@ STREAM_RESTART:
 }
 
 srh_instance_t*
-srh_create_routing_instance(int max_service_port) {
+srh_create_routing_instance(int max_service_port, srh_init_handler_pt init_handler, void* arg) {
   int i;
   srh_instance_t *instance;
   srh_event_t *events;
@@ -469,9 +474,10 @@ srh_create_routing_instance(int max_service_port) {
   instance->ep_events_sz = max_service_port * sizeof(struct epoll_event);
   instance->nevents = max_service_port;
   instance->n = 0; /*Default*/
+  instance->init_handler = init_handler;
+  instance->init_arg = arg;
   // instance->read_handler = read_handler;
   // instance->signal_handler = signal_handler;
-
 
 
   return instance;

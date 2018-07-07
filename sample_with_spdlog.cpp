@@ -3,6 +3,11 @@
 /*https://github.com/gabime/spdlog*/
 #include "spdlog/spdlog.h"
 
+
+/***Compile by ***/
+/** cd build **/
+/** g++ -DSPDLOG_FMT_PRINTF -std=c++11 ../sample_with_spdlog.cpp  -lsrh -pthread **/
+
 static std::shared_ptr<spdlog::logger> file_logger = 0;
 void read_handler(srh_request_t *req);
 void init_logger_in_instance(void *arg);

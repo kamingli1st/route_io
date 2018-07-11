@@ -43,6 +43,7 @@ if(udphevt)SRH_FREE(udphevt);}else SRH_ERROR("error while del fd")
 if(req){\
 if(req->in_buff)SRH_FREE(req->in_buff);\
 if(req->out_buff)SRH_FREE(req->out_buff);\
+ev->on_conn_close_handler(req);\
 SRH_FREE(req);}
 
 #define SRH_TCP_CHECK_TRY(n, nextstep, rt) \
@@ -272,6 +273,7 @@ ERROR_EXIT_REQUEST:
   if (req) {
     srh_do_close(req->sockfd);
     if (req->out_buff)SRH_FREE(req->out_buff);
+    ev->on_conn_close_handler(req);
     SRH_FREE(req);
   }
   pthread_exit(NULL);
@@ -335,6 +337,7 @@ srh_run_epoll(srh_instance_t *instance) {
           req->in_buff = buf;
           req->out_buff = NULL;
           req->event = ev;
+          req->ctx_val = NULL;
           // req->instance = ev->instance;
           pthread_t t;
           if (pthread_create(&t, NULL, srh_read_handler_spawn, req)) {
@@ -371,6 +374,7 @@ srh_run_epoll(srh_instance_t *instance) {
       req->sockfd = fd;
       req->event = ev;
       req->out_buff = NULL;
+      req->ctx_val = NULL;
       // req->instance = ev->instance;
 
       pthread_t t;
@@ -582,15 +586,29 @@ srh_signal_backtrace(int sfd) {
   exit(EXIT_FAILURE);
 }
 
+static void srh_def_On_conn_close_handler(srh_request_t *req) {
+  /*Do nothing*/
+}
+
 int
-srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int max_message_queue) {
+srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int max_message_queue, srh_on_conn_close_pt on_conn_close_handler) {
+  if (read_handler == NULL) {
+    SRH_ERROR("Read handler cannot be NULL");
+    return -1;
+  }
+
   if (!instance || instance->nevents == 0 ||  instance->nevents <= instance->n) {
     SRH_ERROR("error while adding service port");
     return -1;
   }
 
   srh_event_t * ev = &instance->evts[instance->n++];
+
   ev->read_handler = read_handler;
+  if (on_conn_close_handler == NULL) {
+    on_conn_close_handler = srh_def_On_conn_close_handler;
+  }
+  ev->on_conn_close_handler = on_conn_close_handler;
   ev->max_message_queue = max_message_queue;
 
   ev->isudp = 1;
@@ -605,7 +623,12 @@ srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_hand
 }
 
 int
-srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int backlog) {
+srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int backlog, srh_on_conn_close_pt on_conn_close_handler) {
+  if (read_handler == NULL) {
+    SRH_ERROR("Read handler cannot be NULL");
+    return -1;
+  }
+
   if (!instance || instance->nevents == 0 ||  instance->nevents <= instance->n) {
     SRH_ERROR("error while adding service port");
     return -1;
@@ -613,6 +636,10 @@ srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_hand
 
   srh_event_t * ev = &instance->evts[instance->n++];
   ev->read_handler = read_handler;
+  if (on_conn_close_handler == NULL) {
+    on_conn_close_handler = srh_def_On_conn_close_handler;
+  }
+  ev->on_conn_close_handler = on_conn_close_handler;
   ev->isudp = 0;
   ev->is_listener = 1;
 

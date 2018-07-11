@@ -13,6 +13,7 @@ extern "C" {
 typedef struct srh_instance_s srh_instance_t;
 typedef struct srh_request_s srh_request_t;
 typedef void (*srh_read_handler_pt)(srh_request_t *);
+typedef void (*srh_on_conn_close_pt)(srh_request_t *);
 typedef void (*srh_init_handler_pt)(void*);
 
 #define srh_buf_size(b) (size_t) (b->end - b->start)
@@ -36,6 +37,7 @@ typedef struct {
   };
   srh_instance_t *instance;
   srh_read_handler_pt read_handler;
+  srh_on_conn_close_pt on_conn_close_handler;
 } srh_event_t;
 
 struct srh_request_s {
@@ -43,6 +45,7 @@ struct srh_request_s {
   srh_buf_t *in_buff;
   srh_buf_t *out_buff;
   srh_event_t *event;
+  void* ctx_val;
   // srh_instance_t *instance;
 };
 
@@ -59,8 +62,8 @@ struct srh_instance_s {
 extern void srh_write_output_buffer(srh_request_t *req, unsigned char* output);
 extern void srh_write_output_buffer_l(srh_request_t *req, unsigned char* output, size_t len);
 extern srh_instance_t* srh_create_routing_instance(int max_service_port, srh_init_handler_pt init_handler, void *arg );
-extern int srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int max_message_queue);
-extern int srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int backlog);
+extern int srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int max_message_queue, srh_on_conn_close_pt on_conn_close_handler);
+extern int srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int backlog, srh_on_conn_close_pt on_conn_close_handler);
 extern int srh_start(srh_instance_t *instance);
 
 

@@ -38,8 +38,8 @@ int main(int, char* []) {
     try {
         srh_instance_t * instance = srh_create_routing_instance(24, init_logger_in_instance, NULL);
 
-        srh_add_udp_fd(instance, 12345, read_handler, 1024);
-        srh_add_tcp_fd(instance, 3232, read_handler, 64);
+        srh_add_udp_fd(instance, 12345, read_handler, 1024, NULL);
+        srh_add_tcp_fd(instance, 3232, read_handler, 64, NULL);
 
         srh_start(instance);
     }

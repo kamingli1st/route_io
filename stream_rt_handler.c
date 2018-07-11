@@ -157,7 +157,7 @@ srh_create_fd(srh_event_t *ev, u_short port, short af_family, int socket_type, i
       return -1;
     }
   } else {
-    struct epoll_event ee = { .data.ptr = (void*) ev, .events = EPOLLOUT | EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLET };
+    struct epoll_event ee = { .data.ptr = (void*) ev, .events = EPOLLOUT | EPOLLIN | EPOLLRDHUP | EPOLLERR };
     if (SRH_ADD_FD(ev->instance, sockfd, &ee )) {
       SRH_ERROR("error add_to_epoll_fd");
       return -1;

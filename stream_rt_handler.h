@@ -28,6 +28,7 @@ typedef struct {
   unsigned isudp: 1;
   unsigned is_listener: 1;
   union {
+    int max_message_queue;
     lfqueue_t out_queue;
     srh_request_t *out_req;
   };

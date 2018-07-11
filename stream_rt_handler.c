@@ -180,15 +180,9 @@ srh_create_fd(srh_event_t *ev, u_short port, short af_family, int socket_type, i
 void *
 srh_read_handler_spawn(void *req_) {
   srh_request_t *req = req_;
-  // srh_instance_t *instance = req->instance;
   srh_event_t *ev = req->event;
   ev->read_handler(req);
-  // ev->readable = 0, ev->writable = ev->out_buff != NULL;
-  // ev->readable = !(ev->writable = lfqueue_size(&ev->out_queue) > 0);
-  // if (! req->out_buff ) {
-  //   SRH_FREE(req->in_buff);
-  //   SRH_FREE(req);
-  // }
+
   if ( SRH_IS_WRITABLE(ev) /*&& (events & EPOLLOUT)*/) {
     while ( (req = lfqueue_deq(&ev->out_queue)) ) {
       while (sendto(ev->sockfd, req->out_buff->start, req->out_buff->end - req->out_buff->start, 0,
@@ -196,7 +190,6 @@ srh_read_handler_spawn(void *req_) {
 
       SRH_FREE_REQ;
     }
-    // ev->readable = 1, ev->writable = 0;
   }
   pthread_exit(NULL);
 }
@@ -396,7 +389,7 @@ srh_run_epoll(srh_instance_t *instance) {
 
 int
 srh_start(srh_instance_t *instance) {
-  int r, child_status;
+  int r, child_status, i, max_queue_sz;
   pid_t ch_pid;
 
 STREAM_RESTART:
@@ -410,7 +403,18 @@ STREAM_RESTART:
   }
 
   if (ch_pid == 0) {
-    if(instance->init_handler) {
+
+    /** Init udp lfqueue on child process **/
+    for (i = 0; i < instance->n; i++) {
+      srh_event_t * ev = &instance->evts[i];
+      if (ev->isudp) {
+        max_queue_sz = ev->max_message_queue;
+        lfqueue_init(&ev->out_queue, max_queue_sz);
+      }
+    }
+
+
+    if (instance->init_handler) {
       instance->init_handler(instance->init_arg);
     }
 
@@ -587,7 +591,7 @@ srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_hand
 
   srh_event_t * ev = &instance->evts[instance->n++];
   ev->read_handler = read_handler;
-  lfqueue_init(&ev->out_queue, max_message_queue);
+  ev->max_message_queue = max_message_queue;
 
   ev->isudp = 1;
   ev->is_listener = 1;

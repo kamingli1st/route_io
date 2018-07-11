@@ -15,6 +15,8 @@ typedef struct srh_request_s srh_request_t;
 typedef void (*srh_read_handler_pt)(srh_request_t *);
 typedef void (*srh_init_handler_pt)(void*);
 
+#define srh_buf_size(b) (size_t) (b->end - b->start)
+
 typedef struct srh_buf_s {
   unsigned char *start;
   unsigned char *end;

@@ -7,7 +7,7 @@ IF (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 SET(CMAKE_INSTALL_INCLUDEDIR /usr/local/include)
 ENDIF(NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 
-include_directories(/usr/local/include)
+include_directories(/usr/local/include /usr/include)
 
 file(GLOB_RECURSE sources stream_rt_handler.c stream_rt_handler.h)
 file(GLOB_RECURSE example_test stream_rt_handler.c stream_rt_handler.h route_sample.c)

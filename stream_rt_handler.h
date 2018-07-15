@@ -64,7 +64,7 @@ extern void srh_write_output_buffer_l(srh_request_t *req, unsigned char* output,
 extern srh_instance_t* srh_create_routing_instance(int max_service_port, srh_init_handler_pt init_handler, void *arg );
 extern int srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int max_message_queue, srh_on_conn_close_pt on_conn_close_handler);
 extern int srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int backlog, srh_on_conn_close_pt on_conn_close_handler);
-extern int srh_start(srh_instance_t *instance);
+extern int srh_start(srh_instance_t *instance, int with_threads);
 
 
 #ifdef __cplusplus

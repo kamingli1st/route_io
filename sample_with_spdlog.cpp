@@ -41,7 +41,7 @@ int main(int, char* []) {
         srh_add_udp_fd(instance, 12345, read_handler, 1024, NULL);
         srh_add_tcp_fd(instance, 3232, read_handler, 64, NULL);
 
-        srh_start(instance);
+        srh_start(instance, 1);
     }
     catch (const spdlog::spdlog_ex& ex)
     {

@@ -69,6 +69,7 @@ static int srh_do_close(int fd);
 static void srh_add_signal_handler(srh_signal_handler_pt signal_handler);
 static void srh_signal_backtrace(int sfd);
 static int srh_run_epoll(srh_instance_t *instance);
+static int srh_run_epoll_t(srh_instance_t *instance);
 
 void *srh_read_handler_spawn(void *req_);
 void *srh_read_tcp_handler_spawn(void *req_);
@@ -338,6 +339,101 @@ srh_run_epoll(srh_instance_t *instance) {
           req->out_buff = NULL;
           req->event = ev;
           req->ctx_val = NULL;
+
+          srh_read_handler_spawn(req);
+        }
+      }
+    } else {
+      if (events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
+        SRH_DEL_CLOSE_FD(ev->instance, ev->sockfd, ev, epev);
+        continue;
+      }
+      // Get new connection
+      if ((fd = accept( ev->sockfd, (struct sockaddr *)&ev->client_addr,
+                        &ev->client_addrlen)) < 0) {
+        SRH_ERROR("Error while accepting port\n");
+        continue;
+      }
+
+      if ( settimeout(fd, 1000, 1000) == -1 ) {
+        return -1;
+      }
+
+      req = SRH_MALLOC(sizeof(srh_request_t));
+      if (req == NULL) {
+        SRH_ERROR("No Enough memory allocated");
+        return ENOMEM;
+      }
+
+      req->sockfd = fd;
+      req->event = ev;
+      req->out_buff = NULL;
+      req->ctx_val = NULL;
+      srh_read_tcp_handler_spawn(req);
+    }
+  }
+  return 0;
+}
+
+static int
+srh_run_epoll_t(srh_instance_t *instance) {
+  struct epoll_event *ep_events = instance->ep_events;
+  struct epoll_event *epev;
+  srh_event_t *ev;
+  int i, n;
+  int events;
+  int fd;
+  int bytes_read;
+  srh_request_t *req;
+  srh_buf_t *buf;
+
+  memset(ep_events, 0, instance->ep_events_sz);
+  do {
+    n = epoll_wait(instance->epfd, ep_events, instance->nevents, 5000);
+  } while (n == -1 && errno == EINTR);
+
+  if (n == -1) {
+    return -1;
+  }
+
+  for (i = 0; i < n; i++) {
+    epev = &ep_events[i];
+    events = epev->events;
+    ev = epev->data.ptr;
+
+    if (ev->isudp) {
+      fd = ev->sockfd;
+      /**UDP**/
+      if ( events & EPOLLIN  ) {
+
+#if defined _WIN32 || _WIN64
+        ioctlsocket(fd, FIONREAD, &bytes_read);
+#else
+        ioctl(fd, FIONREAD, &bytes_read);
+#endif
+        if (bytes_read > 0) {
+          buf = SRH_MALLOC(sizeof(srh_buf_t) + bytes_read);
+          if (buf == NULL) {
+            SRH_ERROR("No Enough memory allocated");
+            return -1;
+          }
+          buf->start = ((u_char*) buf) + sizeof(srh_buf_t);
+
+          while (recvfrom(fd, buf->start, bytes_read, 0,
+                          (struct sockaddr *) &ev->client_addr, &ev->client_addrlen) == -1 && errno == EINTR) /*Loop till success or error*/;
+
+          buf->end = buf->start + bytes_read;
+          // ev->in_buff = buf;
+          req = SRH_MALLOC(sizeof(srh_request_t));
+          if (req == NULL) {
+            SRH_ERROR("No Enough memory allocated");
+            return -1;
+          }
+          req->sockfd = fd;
+          req->in_buff = buf;
+          req->out_buff = NULL;
+          req->event = ev;
+          req->ctx_val = NULL;
           // req->instance = ev->instance;
           pthread_t t;
           if (pthread_create(&t, NULL, srh_read_handler_spawn, req)) {
@@ -392,7 +488,7 @@ srh_run_epoll(srh_instance_t *instance) {
 #define any_child_pid -1
 
 int
-srh_start(srh_instance_t *instance) {
+srh_start(srh_instance_t *instance, int with_threads) {
   int r, child_status, i, max_queue_sz;
   pid_t ch_pid;
 
@@ -422,8 +518,11 @@ STREAM_RESTART:
       instance->init_handler(instance->init_arg);
     }
 
-    while ((r = srh_run_epoll(instance)) == 0) /*loop*/;
-
+    if (with_threads) {
+      while ((r = srh_run_epoll_t(instance)) == 0) /*loop*/;
+    } else {
+      while ((r = srh_run_epoll(instance)) == 0) /*loop*/;
+    }
     if (r == -1) {
       SRH_ERROR("error while processing ");
       exit(EXIT_SUCCESS);

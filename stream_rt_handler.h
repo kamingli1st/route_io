@@ -8,7 +8,7 @@ extern "C" {
 #include <stdlib.h>
 #include <stdint.h>
 #include <netinet/in.h>
-#include <lfqas/lfqueue.h>
+#include <lfsaq/lfqueue.h>
 
 typedef struct srh_instance_s srh_instance_t;
 typedef struct srh_request_s srh_request_t;

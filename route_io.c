@@ -19,34 +19,34 @@
 #include <fcntl.h>
 #include "route_io.h"
 
-#define SRH_DEBUG(msg) fprintf(stderr, "%s\n", msg)
-#define SRH_ERROR(errmsg) fprintf(stderr, "%s - %s\n", errmsg, strerror(errno) )
-#define SRH_MALLOC malloc
-#define SRH_FREE(p) free(p);p=NULL
-#define SRH_DEF_BUF_SIZE 1024
-#define SRH_DEF_LOGGER_ stderr
-#define SRH_IS_WRITABLE(ev) lfqueue_size(&ev->out_queue)
-#define SRH_STRLEN(p) strlen((char*)p)
+#define RIO_DEBUG(msg) fprintf(stderr, "%s\n", msg)
+#define RIO_ERROR(errmsg) fprintf(stderr, "%s - %s\n", errmsg, strerror(errno) )
+#define RIO_MALLOC malloc
+#define RIO_FREE(p) free(p);p=NULL
+#define RIO_DEF_BUF_SIZE 1024
+#define RIO_DEF_LOGGER_ stderr
+#define RIO_IS_WRITABLE(ev) lfqueue_size(&ev->out_queue)
+#define RIO_STRLEN(p) strlen((char*)p)
 
-#define SRH_WAIT_FOR_READ_WRITE
-#define SRH_RELEASE_WAIT_FOR_READ_WRITE
+#define RIO_WAIT_FOR_READ_WRITE
+#define RIO_RELEASE_WAIT_FOR_READ_WRITE
 
-#define SRH_ADD_FD(instance, fd, ee) epoll_ctl(instance->epfd, EPOLL_CTL_ADD, fd, ee)
-#define SRH_MODIFY_FD(instance, fd, ee) epoll_ctl(instance->epfd, EPOLL_CTL_MOD, fd, ee)
-#define SRH_DEL_CLOSE_FD(instance, fd, udphevt, ee)\
+#define RIO_ADD_FD(instance, fd, ee) epoll_ctl(instance->epfd, EPOLL_CTL_ADD, fd, ee)
+#define RIO_MODIFY_FD(instance, fd, ee) epoll_ctl(instance->epfd, EPOLL_CTL_MOD, fd, ee)
+#define RIO_DEL_CLOSE_FD(instance, fd, udphevt, ee)\
 ee->data.ptr = NULL;\
 if(epoll_ctl(instance->epfd, EPOLL_CTL_DEL, fd, NULL) != -1) {\
-srh_do_close(fd);\
-if(udphevt)SRH_FREE(udphevt);}else SRH_ERROR("error while del fd")
+rio_do_close(fd);\
+if(udphevt)RIO_FREE(udphevt);}else RIO_ERROR("error while del fd")
 
-#define SRH_FREE_REQ \
+#define RIO_FREE_REQ \
 if(req){\
-if(req->in_buff)SRH_FREE(req->in_buff);\
-if(req->out_buff)SRH_FREE(req->out_buff);\
+if(req->in_buff)RIO_FREE(req->in_buff);\
+if(req->out_buff)RIO_FREE(req->out_buff);\
 ev->on_conn_close_handler(req);\
-SRH_FREE(req);}
+RIO_FREE(req);}
 
-#define SRH_TCP_CHECK_TRY(n, nextstep, rt) \
+#define RIO_TCP_CHECK_TRY(n, nextstep, rt) \
 if(n<0){\
 if (errno == EWOULDBLOCK || errno == EINTR) {\
 nextstep;\
@@ -57,7 +57,7 @@ rt;\
 }else if(n == 0) { \
 rt;}
 
-typedef void (*srh_signal_handler_pt)(int);
+typedef void (*rio_signal_handler_pt)(int);
 
 static struct sigaction sa;
 static int  has_init_signal = 0;
@@ -65,17 +65,17 @@ static int setnonblocking(int fd);
 static int settimeout(int fd, int recv_timeout_ms, int send_timeout_ms);
 /*** temporary disable for unused warning ***/
 // static int setlinger(int sockfd, int onoff, int timeout_sec);
-static int srh_do_close(int fd);
-static void srh_add_signal_handler(srh_signal_handler_pt signal_handler);
-static void srh_signal_backtrace(int sfd);
-static int srh_run_epoll(srh_instance_t *instance);
-static int srh_run_epoll_t(srh_instance_t *instance);
+static int rio_do_close(int fd);
+static void rio_add_signal_handler(rio_signal_handler_pt signal_handler);
+static void rio_signal_backtrace(int sfd);
+static int rio_run_epoll(rio_instance_t *instance);
+static int rio_run_epoll_t(rio_instance_t *instance);
 
-void *srh_read_handler_spawn(void *req_);
-void *srh_read_tcp_handler_spawn(void *req_);
+void *rio_read_handler_spawn(void *req_);
+void *rio_read_tcp_handler_spawn(void *req_);
 
 static int
-srh_do_close(int fd) {
+rio_do_close(int fd) {
   int r;
   do {
     shutdown(fd, SHUT_RDWR);
@@ -86,51 +86,51 @@ srh_do_close(int fd) {
 }
 
 void
-srh_write_output_buffer(srh_request_t *req, u_char* output) {
-  size_t outsz = SRH_STRLEN(output);
+rio_write_output_buffer(rio_request_t *req, u_char* output) {
+  size_t outsz = RIO_STRLEN(output);
   if (outsz == 0) {
     return ;
   }
-  srh_buf_t *buf = SRH_MALLOC(sizeof(srh_buf_t) + outsz);
+  rio_buf_t *buf = RIO_MALLOC(sizeof(rio_buf_t) + outsz);
   if (!buf) {
-    SRH_ERROR("malloc");
+    RIO_ERROR("malloc");
     return;
   }
-  buf->start = ((u_char*)buf) + sizeof(srh_buf_t);
+  buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
   buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
   req->out_buff = buf;
 
   if (req->event->isudp) {
-    while (lfqueue_enq(&req->event->out_queue, req) != 1) { SRH_DEBUG("QUEUE INFINITE LOOP"); };
+    while (lfqueue_enq(&req->event->out_queue, req) != 1) { RIO_DEBUG("QUEUE INFINITE LOOP"); };
   } else {
     req->event->out_req = req;
   }
 }
 
 void
-srh_write_output_buffer_l(srh_request_t *req, u_char* output, size_t len) {
+rio_write_output_buffer_l(rio_request_t *req, u_char* output, size_t len) {
   if (len == 0) {
     return ;
   }
-  srh_buf_t *buf = SRH_MALLOC(sizeof(srh_buf_t) + len + 1);
+  rio_buf_t *buf = RIO_MALLOC(sizeof(rio_buf_t) + len + 1);
   if (!buf) {
-    SRH_ERROR("malloc");
+    RIO_ERROR("malloc");
     return;
   }
-  buf->start = ((u_char*)buf) + sizeof(srh_buf_t);
+  buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
   buf->end = ((u_char *)memcpy( buf->start, output, len)) + len ;
   *buf->end++ = '\n' ;
   req->out_buff = buf;
 
   if (req->event->isudp) {
-    while ( lfqueue_enq(&req->event->out_queue, req) != 1 ) { SRH_DEBUG("QUEUE INFINITE LOOP");};
+    while ( lfqueue_enq(&req->event->out_queue, req) != 1 ) { RIO_DEBUG("QUEUE INFINITE LOOP");};
   } else {
     req->event->out_req = req;
   }
 }
 
 static int
-srh_create_fd(srh_event_t *ev, u_short port, short af_family, int socket_type, int protocol, int backlog) {
+rio_create_fd(rio_event_t *ev, u_short port, short af_family, int socket_type, int protocol, int backlog) {
   struct sockaddr_in serveraddr;
   int sockfd;
   static int optval = 1;
@@ -149,19 +149,19 @@ srh_create_fd(srh_event_t *ev, u_short port, short af_family, int socket_type, i
   if (!ev->isudp) {
 
     if (setnonblocking(sockfd) == -1 /*|| setlinger(sockfd, 1, 3) == -1 || settimeout(sockfd, 1000, 1000) == -1 */) {
-      SRH_ERROR("Error while creating fd");
+      RIO_ERROR("Error while creating fd");
       return -1;
     }
 
     struct epoll_event ee = { .data.ptr = (void*) ev, .events = EPOLLIN | EPOLLRDHUP | EPOLLERR };
-    if (SRH_ADD_FD(ev->instance, sockfd, &ee )) {
-      SRH_ERROR("error add_to_epoll_fd");
+    if (RIO_ADD_FD(ev->instance, sockfd, &ee )) {
+      RIO_ERROR("error add_to_epoll_fd");
       return -1;
     }
   } else {
     struct epoll_event ee = { .data.ptr = (void*) ev, .events = EPOLLOUT | EPOLLIN | EPOLLRDHUP | EPOLLERR };
-    if (SRH_ADD_FD(ev->instance, sockfd, &ee )) {
-      SRH_ERROR("error add_to_epoll_fd");
+    if (RIO_ADD_FD(ev->instance, sockfd, &ee )) {
+      RIO_ERROR("error add_to_epoll_fd");
       return -1;
     }
   }
@@ -180,59 +180,59 @@ srh_create_fd(srh_event_t *ev, u_short port, short af_family, int socket_type, i
 }
 
 void *
-srh_read_handler_spawn(void *req_) {
-  srh_request_t *req = req_;
-  srh_event_t *ev = req->event;
+rio_read_handler_spawn(void *req_) {
+  rio_request_t *req = req_;
+  rio_event_t *ev = req->event;
   ev->read_handler(req);
 
-  if ( SRH_IS_WRITABLE(ev) /*&& (events & EPOLLOUT)*/) {
+  if ( RIO_IS_WRITABLE(ev) /*&& (events & EPOLLOUT)*/) {
     while ( (req = lfqueue_deq(&ev->out_queue)) ) {
       while (sendto(ev->sockfd, req->out_buff->start, req->out_buff->end - req->out_buff->start, 0,
                     (struct sockaddr *) &ev->client_addr, ev->client_addrlen) == -1 && errno == EINTR) /*Loop till success or error*/;
 
-      SRH_FREE_REQ;
+      RIO_FREE_REQ;
     }
   }
   pthread_exit(NULL);
 }
 
 void *
-srh_read_tcp_handler_spawn(void *req_) {
-  srh_request_t *req = req_;
-  // srh_instance_t *instance = req->instance;
-  srh_event_t *ev = req->event;
+rio_read_tcp_handler_spawn(void *req_) {
+  rio_request_t *req = req_;
+  // rio_instance_t *instance = req->instance;
+  rio_event_t *ev = req->event;
   int fd;
-  srh_buf_t * buf;
+  rio_buf_t * buf;
   int bytes_read, bytes_send, est_bytes_left;
 
   if (req->sockfd < 0)
     goto ERROR_EXIT_REQUEST;
 
   fd = req->sockfd;
-  buf = SRH_MALLOC(sizeof(srh_buf_t) + SRH_DEF_BUF_SIZE );
+  buf = RIO_MALLOC(sizeof(rio_buf_t) + RIO_DEF_BUF_SIZE );
   if (buf == NULL) {
-    SRH_ERROR("No Enough memory allocated");
+    RIO_ERROR("No Enough memory allocated");
     goto ERROR_EXIT_REQUEST;
   }
-  buf->total_size = SRH_DEF_BUF_SIZE;
-  buf->start = buf->end = ((u_char*) buf) + sizeof(srh_buf_t);
-  srh_buf_t *new_buf;
+  buf->total_size = RIO_DEF_BUF_SIZE;
+  buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);
+  rio_buf_t *new_buf;
 
 REREAD:
   do {
-    if ((bytes_read = recv( fd , buf->end, SRH_DEF_BUF_SIZE, 0)) > 0 ) {
+    if ((bytes_read = recv( fd , buf->end, RIO_DEF_BUF_SIZE, 0)) > 0 ) {
       buf->end += bytes_read;
       size_t curr_size = buf->end - buf->start;
-      if ( curr_size + SRH_DEF_BUF_SIZE >= buf->total_size ) {
-        new_buf = SRH_MALLOC(sizeof(srh_buf_t) + buf->total_size * 2);
+      if ( curr_size + RIO_DEF_BUF_SIZE >= buf->total_size ) {
+        new_buf = RIO_MALLOC(sizeof(rio_buf_t) + buf->total_size * 2);
         if (!new_buf) {
-          SRH_ERROR("Error creating thread\n");
+          RIO_ERROR("Error creating thread\n");
           goto EXIT_REQUEST;
         }
-        new_buf->start = ((u_char*) new_buf) + sizeof(srh_buf_t);
+        new_buf->start = ((u_char*) new_buf) + sizeof(rio_buf_t);
         new_buf->end = ((u_char*) memcpy(new_buf->start, buf->start, curr_size)) + curr_size;
         new_buf->total_size = buf->total_size * 2;
-        SRH_FREE(buf);
+        RIO_FREE(buf);
         buf = new_buf;
       }
 #if defined _WIN32 || _WIN64
@@ -243,7 +243,7 @@ REREAD:
     }
   } while (est_bytes_left > 0);
 
-  SRH_TCP_CHECK_TRY(bytes_read, goto REREAD, goto EXIT_REQUEST);
+  RIO_TCP_CHECK_TRY(bytes_read, goto REREAD, goto EXIT_REQUEST);
 
   if ((buf->end - buf->start) == 0) {
     goto EXIT_REQUEST;
@@ -254,7 +254,7 @@ REREAD:
 
   if ( req->out_buff && (bytes_send = req->out_buff->end - req->out_buff->start) ) {
     while ( (bytes_read = send(req->sockfd, req->out_buff->start, bytes_send, 0)) < 0) {
-      SRH_TCP_CHECK_TRY(bytes_read, continue, goto EXIT_REQUEST);
+      RIO_TCP_CHECK_TRY(bytes_read, continue, goto EXIT_REQUEST);
     }
   }
 
@@ -262,35 +262,35 @@ REREAD:
     buf->start = buf->end;
   }
   if (req->out_buff) {
-    SRH_FREE(req->out_buff);
+    RIO_FREE(req->out_buff);
     req->out_buff = NULL;
   }
 
   goto REREAD;
 
 EXIT_REQUEST:
-  SRH_FREE(buf);
+  RIO_FREE(buf);
 ERROR_EXIT_REQUEST:
   if (req) {
-    srh_do_close(req->sockfd);
-    if (req->out_buff)SRH_FREE(req->out_buff);
+    rio_do_close(req->sockfd);
+    if (req->out_buff)RIO_FREE(req->out_buff);
     ev->on_conn_close_handler(req);
-    SRH_FREE(req);
+    RIO_FREE(req);
   }
   pthread_exit(NULL);
 }
 
 static int
-srh_run_epoll(srh_instance_t *instance) {
+rio_run_epoll(rio_instance_t *instance) {
   struct epoll_event *ep_events = instance->ep_events;
   struct epoll_event *epev;
-  srh_event_t *ev;
+  rio_event_t *ev;
   int i, n;
   int events;
   int fd;
   int bytes_read;
-  srh_request_t *req;
-  srh_buf_t *buf;
+  rio_request_t *req;
+  rio_buf_t *buf;
 
   memset(ep_events, 0, instance->ep_events_sz);
   do {
@@ -317,21 +317,21 @@ srh_run_epoll(srh_instance_t *instance) {
         ioctl(fd, FIONREAD, &bytes_read);
 #endif
         if (bytes_read > 0) {
-          buf = SRH_MALLOC(sizeof(srh_buf_t) + bytes_read);
+          buf = RIO_MALLOC(sizeof(rio_buf_t) + bytes_read);
           if (buf == NULL) {
-            SRH_ERROR("No Enough memory allocated");
+            RIO_ERROR("No Enough memory allocated");
             return -1;
           }
-          buf->start = ((u_char*) buf) + sizeof(srh_buf_t);
+          buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
 
           while (recvfrom(fd, buf->start, bytes_read, 0,
                           (struct sockaddr *) &ev->client_addr, &ev->client_addrlen) == -1 && errno == EINTR) /*Loop till success or error*/;
 
           buf->end = buf->start + bytes_read;
           // ev->in_buff = buf;
-          req = SRH_MALLOC(sizeof(srh_request_t));
+          req = RIO_MALLOC(sizeof(rio_request_t));
           if (req == NULL) {
-            SRH_ERROR("No Enough memory allocated");
+            RIO_ERROR("No Enough memory allocated");
             return -1;
           }
           req->sockfd = fd;
@@ -340,18 +340,18 @@ srh_run_epoll(srh_instance_t *instance) {
           req->event = ev;
           req->ctx_val = NULL;
 
-          srh_read_handler_spawn(req);
+          rio_read_handler_spawn(req);
         }
       }
     } else {
       if (events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
-        SRH_DEL_CLOSE_FD(ev->instance, ev->sockfd, ev, epev);
+        RIO_DEL_CLOSE_FD(ev->instance, ev->sockfd, ev, epev);
         continue;
       }
       // Get new connection
       if ((fd = accept( ev->sockfd, (struct sockaddr *)&ev->client_addr,
                         &ev->client_addrlen)) < 0) {
-        SRH_ERROR("Error while accepting port\n");
+        RIO_ERROR("Error while accepting port\n");
         continue;
       }
 
@@ -359,9 +359,9 @@ srh_run_epoll(srh_instance_t *instance) {
         return -1;
       }
 
-      req = SRH_MALLOC(sizeof(srh_request_t));
+      req = RIO_MALLOC(sizeof(rio_request_t));
       if (req == NULL) {
-        SRH_ERROR("No Enough memory allocated");
+        RIO_ERROR("No Enough memory allocated");
         return ENOMEM;
       }
 
@@ -369,23 +369,23 @@ srh_run_epoll(srh_instance_t *instance) {
       req->event = ev;
       req->out_buff = NULL;
       req->ctx_val = NULL;
-      srh_read_tcp_handler_spawn(req);
+      rio_read_tcp_handler_spawn(req);
     }
   }
   return 0;
 }
 
 static int
-srh_run_epoll_t(srh_instance_t *instance) {
+rio_run_epoll_t(rio_instance_t *instance) {
   struct epoll_event *ep_events = instance->ep_events;
   struct epoll_event *epev;
-  srh_event_t *ev;
+  rio_event_t *ev;
   int i, n;
   int events;
   int fd;
   int bytes_read;
-  srh_request_t *req;
-  srh_buf_t *buf;
+  rio_request_t *req;
+  rio_buf_t *buf;
 
   memset(ep_events, 0, instance->ep_events_sz);
   do {
@@ -412,21 +412,21 @@ srh_run_epoll_t(srh_instance_t *instance) {
         ioctl(fd, FIONREAD, &bytes_read);
 #endif
         if (bytes_read > 0) {
-          buf = SRH_MALLOC(sizeof(srh_buf_t) + bytes_read);
+          buf = RIO_MALLOC(sizeof(rio_buf_t) + bytes_read);
           if (buf == NULL) {
-            SRH_ERROR("No Enough memory allocated");
+            RIO_ERROR("No Enough memory allocated");
             return -1;
           }
-          buf->start = ((u_char*) buf) + sizeof(srh_buf_t);
+          buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
 
           while (recvfrom(fd, buf->start, bytes_read, 0,
                           (struct sockaddr *) &ev->client_addr, &ev->client_addrlen) == -1 && errno == EINTR) /*Loop till success or error*/;
 
           buf->end = buf->start + bytes_read;
           // ev->in_buff = buf;
-          req = SRH_MALLOC(sizeof(srh_request_t));
+          req = RIO_MALLOC(sizeof(rio_request_t));
           if (req == NULL) {
-            SRH_ERROR("No Enough memory allocated");
+            RIO_ERROR("No Enough memory allocated");
             return -1;
           }
           req->sockfd = fd;
@@ -436,10 +436,10 @@ srh_run_epoll_t(srh_instance_t *instance) {
           req->ctx_val = NULL;
           // req->instance = ev->instance;
           pthread_t t;
-          if (pthread_create(&t, NULL, srh_read_handler_spawn, req)) {
-            SRH_FREE(req->in_buff);
-            SRH_FREE(req);
-            SRH_ERROR("Error creating thread\n");
+          if (pthread_create(&t, NULL, rio_read_handler_spawn, req)) {
+            RIO_FREE(req->in_buff);
+            RIO_FREE(req);
+            RIO_ERROR("Error creating thread\n");
             return -1;
           }
           pthread_detach(t);
@@ -447,13 +447,13 @@ srh_run_epoll_t(srh_instance_t *instance) {
       }
     } else {
       if (events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
-        SRH_DEL_CLOSE_FD(ev->instance, ev->sockfd, ev, epev);
+        RIO_DEL_CLOSE_FD(ev->instance, ev->sockfd, ev, epev);
         continue;
       }
       // Get new connection
       if ((fd = accept( ev->sockfd, (struct sockaddr *)&ev->client_addr,
                         &ev->client_addrlen)) < 0) {
-        SRH_ERROR("Error while accepting port\n");
+        RIO_ERROR("Error while accepting port\n");
         continue;
       }
 
@@ -461,9 +461,9 @@ srh_run_epoll_t(srh_instance_t *instance) {
         return -1;
       }
 
-      req = SRH_MALLOC(sizeof(srh_request_t));
+      req = RIO_MALLOC(sizeof(rio_request_t));
       if (req == NULL) {
-        SRH_ERROR("No Enough memory allocated");
+        RIO_ERROR("No Enough memory allocated");
         return ENOMEM;
       }
 
@@ -474,9 +474,9 @@ srh_run_epoll_t(srh_instance_t *instance) {
       // req->instance = ev->instance;
 
       pthread_t t;
-      if (pthread_create(&t, NULL, srh_read_tcp_handler_spawn, req)) {
-        SRH_FREE(req);
-        SRH_ERROR("Error creating thread\n");
+      if (pthread_create(&t, NULL, rio_read_tcp_handler_spawn, req)) {
+        RIO_FREE(req);
+        RIO_ERROR("Error creating thread\n");
         return -1;
       }
       pthread_detach(t);
@@ -488,13 +488,13 @@ srh_run_epoll_t(srh_instance_t *instance) {
 #define any_child_pid -1
 
 int
-srh_start(srh_instance_t *instance, int with_threads) {
+rio_start(rio_instance_t *instance, int with_threads) {
   int r, child_status, i, max_queue_sz;
   pid_t ch_pid;
 
 STREAM_RESTART:
   if (!has_init_signal) {
-    srh_add_signal_handler(srh_signal_backtrace);
+    rio_add_signal_handler(rio_signal_backtrace);
   }
   ch_pid = fork();
   if (ch_pid == -1) {
@@ -506,7 +506,7 @@ STREAM_RESTART:
 
     /** Init udp lfqueue on child process **/
     for (i = 0; i < instance->n; i++) {
-      srh_event_t * ev = &instance->evts[i];
+      rio_event_t * ev = &instance->evts[i];
       if (ev->isudp) {
         max_queue_sz = ev->max_message_queue;
         lfqueue_init(&ev->out_queue, max_queue_sz);
@@ -519,12 +519,12 @@ STREAM_RESTART:
     }
 
     if (with_threads) {
-      while ((r = srh_run_epoll_t(instance)) == 0) /*loop*/;
+      while ((r = rio_run_epoll_t(instance)) == 0) /*loop*/;
     } else {
-      while ((r = srh_run_epoll(instance)) == 0) /*loop*/;
+      while ((r = rio_run_epoll(instance)) == 0) /*loop*/;
     }
     if (r == -1) {
-      SRH_ERROR("error while processing ");
+      RIO_ERROR("error while processing ");
       exit(EXIT_SUCCESS);
     }
   } else {
@@ -539,16 +539,16 @@ STREAM_RESTART:
   return 0;
 }
 
-srh_instance_t*
-srh_create_routing_instance(int max_service_port, srh_init_handler_pt init_handler, void* arg) {
+rio_instance_t*
+rio_create_routing_instance(int max_service_port, rio_init_handler_pt init_handler, void* arg) {
   int i;
-  srh_instance_t *instance;
-  srh_event_t *events;
+  rio_instance_t *instance;
+  rio_event_t *events;
   struct epoll_event *ep_events;
-  instance = SRH_MALLOC(sizeof(srh_instance_t));
+  instance = RIO_MALLOC(sizeof(rio_instance_t));
 
   if (!instance) {
-    SRH_ERROR("malloc");
+    RIO_ERROR("malloc");
     return NULL;
   }
 
@@ -557,13 +557,13 @@ srh_create_routing_instance(int max_service_port, srh_init_handler_pt init_handl
     return NULL;
   }
 
-  if ((events = SRH_MALLOC(max_service_port * sizeof(srh_event_t))) == NULL) {
+  if ((events = RIO_MALLOC(max_service_port * sizeof(rio_event_t))) == NULL) {
     fprintf(stderr, "%s\n", "error malloc");
     return NULL;
   }
 
 
-  if ((ep_events = SRH_MALLOC(max_service_port * sizeof(struct epoll_event))) == NULL) {
+  if ((ep_events = RIO_MALLOC(max_service_port * sizeof(struct epoll_event))) == NULL) {
     fprintf(stderr, "%s\n", "error malloc");
     return NULL;
   }
@@ -598,12 +598,12 @@ setnonblocking(int fd) {
 #else
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags == -1) {
-    SRH_ERROR("error while configure fd non blocking");
+    RIO_ERROR("error while configure fd non blocking");
     return -1;
   }
   flags = (flags | O_NONBLOCK);
   if (fcntl(fd, F_SETFL, flags) != 0) {
-    SRH_ERROR("error while configure fd non blocking");
+    RIO_ERROR("error while configure fd non blocking");
     return -1;
   }
 #endif
@@ -617,7 +617,7 @@ setnonblocking(int fd) {
 //   l.l_onoff  = onoff;
 //   l.l_linger = timeout_sec;
 //   if (setsockopt(sockfd, SOL_SOCKET, SO_LINGER, (char *) &l, sizeof(l)) < 0) {
-//     return SRH_ERROR("Error while setting linger");
+//     return RIO_ERROR("Error while setting linger");
 //   };
 // }
 
@@ -631,7 +631,7 @@ settimeout(int fd, int recv_timeout_ms, int send_timeout_ms) {
   recv_tmout_val.tv_usec = (recv_timeout_ms % 1000) * 1000 ;
   if (setsockopt (fd, SOL_SOCKET, SO_RCVTIMEO, &recv_tmout_val,
                   sizeof(recv_tmout_val)) < 0) {
-    SRH_ERROR("setsockopt recv_tmout_val failed\n");
+    RIO_ERROR("setsockopt recv_tmout_val failed\n");
     return -1;
   }
 
@@ -639,7 +639,7 @@ settimeout(int fd, int recv_timeout_ms, int send_timeout_ms) {
   send_tmout_val.tv_usec = (send_timeout_ms % 1000) * 1000 ;
   if (setsockopt (fd, SOL_SOCKET, SO_SNDTIMEO, &send_tmout_val,
                   sizeof(send_tmout_val)) < 0) {
-    SRH_ERROR("setsockopt send_tmout_val failed\n");
+    RIO_ERROR("setsockopt send_tmout_val failed\n");
     return -1;
   }
 
@@ -647,7 +647,7 @@ settimeout(int fd, int recv_timeout_ms, int send_timeout_ms) {
 }
 
 static void
-srh_add_signal_handler(srh_signal_handler_pt signal_handler) {
+rio_add_signal_handler(rio_signal_handler_pt signal_handler) {
   memset(&sa, 0, sizeof(struct sigaction));
   sa.sa_handler = signal_handler;
   sigemptyset(&sa.sa_mask);
@@ -664,7 +664,7 @@ srh_add_signal_handler(srh_signal_handler_pt signal_handler) {
 }
 
 static void
-srh_signal_backtrace(int sfd) {
+rio_signal_backtrace(int sfd) {
   size_t i, ptr_size;
   void *buffer[10];
   char **strings;
@@ -674,7 +674,7 @@ srh_signal_backtrace(int sfd) {
 
   strings = backtrace_symbols(buffer, ptr_size);
   if (strings == NULL) {
-    SRH_ERROR("backtrace_symbols");
+    RIO_ERROR("backtrace_symbols");
     exit(EXIT_FAILURE);
   }
 
@@ -685,27 +685,27 @@ srh_signal_backtrace(int sfd) {
   exit(EXIT_FAILURE);
 }
 
-static void srh_def_On_conn_close_handler(srh_request_t *req) {
+static void rio_def_On_conn_close_handler(rio_request_t *req) {
   /*Do nothing*/
 }
 
 int
-srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int max_message_queue, srh_on_conn_close_pt on_conn_close_handler) {
+rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int max_message_queue, rio_on_conn_close_pt on_conn_close_handler) {
   if (read_handler == NULL) {
-    SRH_ERROR("Read handler cannot be NULL");
+    RIO_ERROR("Read handler cannot be NULL");
     return -1;
   }
 
   if (!instance || instance->nevents == 0 ||  instance->nevents <= instance->n) {
-    SRH_ERROR("error while adding service port");
+    RIO_ERROR("error while adding service port");
     return -1;
   }
 
-  srh_event_t * ev = &instance->evts[instance->n++];
+  rio_event_t * ev = &instance->evts[instance->n++];
 
   ev->read_handler = read_handler;
   if (on_conn_close_handler == NULL) {
-    on_conn_close_handler = srh_def_On_conn_close_handler;
+    on_conn_close_handler = rio_def_On_conn_close_handler;
   }
   ev->on_conn_close_handler = on_conn_close_handler;
   ev->max_message_queue = max_message_queue;
@@ -713,8 +713,8 @@ srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_hand
   ev->isudp = 1;
   ev->is_listener = 1;
 
-  if ((ev->sockfd = srh_create_fd(ev, port, AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, 0 )) == -1) {
-    SRH_ERROR("error srh_create_fd");
+  if ((ev->sockfd = rio_create_fd(ev, port, AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, 0 )) == -1) {
+    RIO_ERROR("error rio_create_fd");
     return -1;
   }
 
@@ -722,28 +722,28 @@ srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_hand
 }
 
 int
-srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int backlog, srh_on_conn_close_pt on_conn_close_handler) {
+rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog, rio_on_conn_close_pt on_conn_close_handler) {
   if (read_handler == NULL) {
-    SRH_ERROR("Read handler cannot be NULL");
+    RIO_ERROR("Read handler cannot be NULL");
     return -1;
   }
 
   if (!instance || instance->nevents == 0 ||  instance->nevents <= instance->n) {
-    SRH_ERROR("error while adding service port");
+    RIO_ERROR("error while adding service port");
     return -1;
   }
 
-  srh_event_t * ev = &instance->evts[instance->n++];
+  rio_event_t * ev = &instance->evts[instance->n++];
   ev->read_handler = read_handler;
   if (on_conn_close_handler == NULL) {
-    on_conn_close_handler = srh_def_On_conn_close_handler;
+    on_conn_close_handler = rio_def_On_conn_close_handler;
   }
   ev->on_conn_close_handler = on_conn_close_handler;
   ev->isudp = 0;
   ev->is_listener = 1;
 
-  if ((ev->sockfd = srh_create_fd(ev, port, AF_INET, SOCK_STREAM, 0, backlog )) == -1) {
-    SRH_ERROR("error srh_sockfd");
+  if ((ev->sockfd = rio_create_fd(ev, port, AF_INET, SOCK_STREAM, 0, backlog )) == -1) {
+    RIO_ERROR("error rio_sockfd");
     return -1;
   }
 

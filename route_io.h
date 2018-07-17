@@ -1,5 +1,5 @@
-#ifndef STREAM_RT_HANDLER_H
-#define STREAM_RT_HANDLER_H
+#ifndef ROUTE_IO_HANDLER_H
+#define ROUTE_IO_HANDLER_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,19 +10,19 @@ extern "C" {
 #include <netinet/in.h>
 #include <lfsaq/lfqueue.h>
 
-typedef struct srh_instance_s srh_instance_t;
-typedef struct srh_request_s srh_request_t;
-typedef void (*srh_read_handler_pt)(srh_request_t *);
-typedef void (*srh_on_conn_close_pt)(srh_request_t *);
-typedef void (*srh_init_handler_pt)(void*);
+typedef struct rio_instance_s rio_instance_t;
+typedef struct rio_request_s rio_request_t;
+typedef void (*rio_read_handler_pt)(rio_request_t *);
+typedef void (*rio_on_conn_close_pt)(rio_request_t *);
+typedef void (*rio_init_handler_pt)(void*);
 
-#define srh_buf_size(b) (size_t) (b->end - b->start)
+#define rio_buf_size(b) (size_t) (b->end - b->start)
 
-typedef struct srh_buf_s {
+typedef struct rio_buf_s {
   unsigned char *start;
   unsigned char *end;
   size_t total_size;
-} srh_buf_t;
+} rio_buf_t;
 
 typedef struct {
   int sockfd;
@@ -33,38 +33,38 @@ typedef struct {
   union {
     int max_message_queue;
     lfqueue_t out_queue;
-    srh_request_t *out_req;
+    rio_request_t *out_req;
   };
-  srh_instance_t *instance;
-  srh_read_handler_pt read_handler;
-  srh_on_conn_close_pt on_conn_close_handler;
-} srh_event_t;
+  rio_instance_t *instance;
+  rio_read_handler_pt read_handler;
+  rio_on_conn_close_pt on_conn_close_handler;
+} rio_event_t;
 
-struct srh_request_s {
+struct rio_request_s {
   int sockfd;
-  srh_buf_t *in_buff;
-  srh_buf_t *out_buff;
-  srh_event_t *event;
+  rio_buf_t *in_buff;
+  rio_buf_t *out_buff;
+  rio_event_t *event;
   void* ctx_val;
-  // srh_instance_t *instance;
+  // rio_instance_t *instance;
 };
 
-struct srh_instance_s {
+struct rio_instance_s {
   int epfd;
   int nevents, n;
-  srh_event_t *evts;
+  rio_event_t *evts;
   struct epoll_event *ep_events;
   size_t ep_events_sz;
-  srh_init_handler_pt init_handler;
+  rio_init_handler_pt init_handler;
   void* init_arg;
 };
 
-extern void srh_write_output_buffer(srh_request_t *req, unsigned char* output);
-extern void srh_write_output_buffer_l(srh_request_t *req, unsigned char* output, size_t len);
-extern srh_instance_t* srh_create_routing_instance(int max_service_port, srh_init_handler_pt init_handler, void *arg );
-extern int srh_add_udp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int max_message_queue, srh_on_conn_close_pt on_conn_close_handler);
-extern int srh_add_tcp_fd(srh_instance_t *instance, int port, srh_read_handler_pt read_handler, int backlog, srh_on_conn_close_pt on_conn_close_handler);
-extern int srh_start(srh_instance_t *instance, int with_threads);
+extern void rio_write_output_buffer(rio_request_t *req, unsigned char* output);
+extern void rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len);
+extern rio_instance_t* rio_create_routing_instance(int max_service_port, rio_init_handler_pt init_handler, void *arg );
+extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int max_message_queue, rio_on_conn_close_pt on_conn_close_handler);
+extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog, rio_on_conn_close_pt on_conn_close_handler);
+extern int rio_start(rio_instance_t *instance, int with_threads);
 
 
 #ifdef __cplusplus

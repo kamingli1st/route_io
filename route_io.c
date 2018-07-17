@@ -203,7 +203,7 @@ rio_read_tcp_handler_spawn(void *req_) {
   rio_event_t *ev = req->event;
   int fd;
   rio_buf_t * buf;
-  int bytes_read, bytes_send, est_bytes_left;
+  int bytes_read, bytes_send, est_bytes_left = 0;
 
   if (req->sockfd < 0)
     goto ERROR_EXIT_REQUEST;

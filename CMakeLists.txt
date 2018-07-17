@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
-project(stream_rt_handler)
+project(route_io)
 
-set(PROJNAME srh)
+set(PROJNAME routeio)
 
 IF (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 SET(CMAKE_INSTALL_INCLUDEDIR /usr/local/include)
@@ -9,8 +9,8 @@ ENDIF(NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 
 include_directories(/usr/local/include /usr/include)
 
-file(GLOB_RECURSE sources stream_rt_handler.c stream_rt_handler.h)
-file(GLOB_RECURSE example_test stream_rt_handler.c stream_rt_handler.h route_sample.c)
+file(GLOB_RECURSE sources route_io.c route_io.h)
+file(GLOB_RECURSE example_test route_io.c route_io.h route_sample.c)
 
 add_executable(route_handler ${example_test})
 target_link_libraries(route_handler PUBLIC pthread lfqueue)
@@ -46,7 +46,7 @@ install(TARGETS ${PROJNAME} EXPORT ${PROJNAME}
     LIBRARY DESTINATION lib${LIB_SUFFIX}
     # RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
-install(FILES stream_rt_handler.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES route_io.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 install(CODE "execute_process(COMMAND ldconfig)")
 
@@ -59,7 +59,7 @@ configure_file(
 add_custom_target(uninstall
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
 
-set(CPACK_PACKAGE_NAME "stream_rt_handler")
+set(CPACK_PACKAGE_NAME "route_io")
 set(CPACK_PACKAGE_VERSION "1.0.0")
 
 # we don't want to split our program up into several things

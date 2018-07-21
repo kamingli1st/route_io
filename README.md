@@ -1,5 +1,8 @@
 # route_io
-route_io is tcp and udp handler, one instance handler different protocol and port at one time
+async route tcp/udp data to your c/c++ function, create one instance to handler different protocol and port at one time
+
+
+## For Linux OS build
 
 ## Prerequisition Installed
 
@@ -60,3 +63,16 @@ int main(void) {
 }
 
 ```
+
+
+## for Windows os build
+
+#### Download the Dev-C++ IDE - https://sourceforge.net/projects/orwelldevcpp/
+
+#### go to route_io directory and open routeio_windows.dev, and build it from Dev-C++ IDE.
+
+#### You can use any IDE/build tools as you wish, just add route_io.c route_io.h to your project
+
+
+
+

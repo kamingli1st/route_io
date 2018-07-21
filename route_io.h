@@ -26,7 +26,8 @@ typedef enum {
   rio_READABLE   =   0,
   rio_AFT_READ_AND_WRITABLE  =   1,
   rio_PEER_CLOSED    =   2,
-  rio_DONE_WRITE = 5,
+  rio_IDLE = 3,
+  rio_DONE_WRITE = 4,
 } rio_state;
 
 typedef struct rio_buf_s {

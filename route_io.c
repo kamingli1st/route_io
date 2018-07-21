@@ -41,6 +41,9 @@ static void rio_on_iocp(rio_request_t *req, DWORD nbytes);
 static rio_request_t* rio_create_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read);
 static rio_request_t* rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read);
 static int rio_run_iocp_worker(rio_instance_t *instance);
+static void rio_def_on_conn_close_handler(rio_request_t *req) {
+  /*Do nothing*/
+}
 static HANDLE master_shutdown_ev = 0;
 
 static void
@@ -140,18 +143,18 @@ rio_on_iocp(rio_request_t *req, DWORD nbytes) {
 
 static rio_request_t*
 rio_create_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read) {
-  rio_request_t *req = RIO_MALLOC(sizeof(rio_request_t));
+  rio_request_t *req = (rio_request_t*) RIO_MALLOC(sizeof(rio_request_t));
   req->ovlp.Internal = 0;
   req->ovlp.InternalHigh = 0;
   req->ovlp.Offset = 0;
   req->ovlp.OffsetHigh = 0;
   req->ovlp.hEvent = 0;
-  req->next_state = 0;
+  req->next_state = rio_IDLE;
   req->listenfd = listenfd;
   // int optval = 1;
 
   sz_per_read = sz_per_read ? sz_per_read : DEFAULT_READ_BUFFER_SIZE;
-  rio_buf_t *buf = RIO_MALLOC(sizeof(rio_buf_t) + sz_per_read );
+  rio_buf_t *buf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + sz_per_read );
   buf->total_size = sz_per_read;
   buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);
 
@@ -177,7 +180,7 @@ rio_create_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read) 
 static rio_request_t*
 rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read) {
   int rc;
-  rio_request_t *req = RIO_MALLOC(sizeof(rio_request_t));
+  rio_request_t *req = (rio_request_t*) RIO_MALLOC(sizeof(rio_request_t));
   req->listenfd = listenfd;
   req->ovlp.Internal = 0;
   req->ovlp.InternalHigh = 0;
@@ -190,7 +193,7 @@ rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_re
 
   sz_per_read = sz_per_read ? sz_per_read : DEFAULT_READ_BUFFER_SIZE;
 
-  rio_buf_t *in_buff = RIO_MALLOC( sizeof(rio_buf_t) + (sz_per_read * sizeof(unsigned char)) );
+  rio_buf_t *in_buff = (rio_buf_t*)RIO_MALLOC( sizeof(rio_buf_t) + (sz_per_read * sizeof(unsigned char)) );
   in_buff->end = in_buff->start = ((u_char*) in_buff) + sizeof(rio_buf_t);
   in_buff->total_size = sz_per_read;
   req->in_buff = in_buff;
@@ -214,7 +217,7 @@ rio_udp_request_thread(void *arg) {
   req->read_handler(req);
   if (req->out_buff) {
     if ( (out_sz = rio_buf_size(req->out_buff)) ) {
-      udpbuf.buf = req->out_buff->start;
+      udpbuf.buf = (char*) req->out_buff->start;
       udpbuf.len = out_sz;
       req->next_state = rio_DONE_WRITE;
       if (WSASendTo(req->listenfd, &udpbuf, 1,
@@ -262,9 +265,9 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 //        ioctlsocket(p_req->listenfd, FIONREAD, &nbytes);
         DWORD new_nbytes = nbytes * 2;
 
-        rio_buf_t *new_buf = RIO_MALLOC(sizeof(rio_buf_t) + new_nbytes);
+        rio_buf_t *new_buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + new_nbytes);
         new_buf->start = ((u_char*) new_buf) + sizeof(rio_buf_t);
-        new_buf->end = memcpy(new_buf->start, p_req->in_buff->start, nbytes) + nbytes;
+        new_buf->end = (unsigned char*) memcpy(new_buf->start, p_req->in_buff->start, nbytes) + nbytes;
         new_buf->total_size = new_nbytes;
         RIO_FREE(p_req->in_buff);
         p_req->in_buff = new_buf;
@@ -277,7 +280,7 @@ RIO_UDP_MODE_DATA_READABLE:
       if (p_req->isudp) {
         switch (p_req->next_state) {
         case rio_READABLE:
-          udpbuf.buf = p_req->in_buff->start;
+          udpbuf.buf = (char*) p_req->in_buff->start;
           udpbuf.len = p_req->in_buff->total_size;
           if (WSARecvFrom(p_req->listenfd, &udpbuf, 1, (LPDWORD)&nbytes,
                           (LPDWORD)&udpflag, (struct sockaddr*)&p_req->client_addr,
@@ -289,7 +292,7 @@ RIO_UDP_MODE_DATA_READABLE:
           p_req->next_state = rio_AFT_READ_AND_WRITABLE;
           break;
         case rio_AFT_READ_AND_WRITABLE:
-          p_req->next_state = 0;
+          p_req->next_state = rio_IDLE;
           if (nbytes > 0) {
             p_req->in_buff->end = p_req->in_buff->start + nbytes;
             unsigned udpthreadid;
@@ -330,7 +333,7 @@ rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
   if (outsz == 0) {
     return ;
   }
-  rio_buf_t *buf = RIO_MALLOC(sizeof(rio_buf_t) + outsz);
+  rio_buf_t *buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
   if (!buf) {
     RIO_ERROR("malloc");
     return;
@@ -345,7 +348,7 @@ rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len)
   if (len == 0) {
     return ;
   }
-  rio_buf_t *buf = RIO_MALLOC(sizeof(rio_buf_t) + len + 1);
+  rio_buf_t *buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + len + 1);
   if (!buf) {
     RIO_ERROR("malloc");
     return;
@@ -408,7 +411,7 @@ SPAWN_CHILD_PROC:
     ZeroMemory( &g_pi, sizeof(g_pi) );
 
 
-    TCHAR *child_cmd_str = malloc(sizeof_child_cmdline);
+    TCHAR *child_cmd_str = (TCHAR*) malloc(sizeof_child_cmdline);
     ZeroMemory(child_cmd_str, sizeof_child_cmdline);
 
     sprintf(child_cmd_str, "%s %s", cmd_str, "routeio-child-proc");
@@ -439,7 +442,7 @@ STREAM_RESTART:
   ExitProcess(0);
 
 CONTINUE_CHILD_IOCP_PROCESS:
-  instance = RIO_MALLOC(sizeof(rio_instance_t));
+  instance = (rio_instance_t*) RIO_MALLOC(sizeof(rio_instance_t));
   instance->max_port = max_service_port;
   instance->init_handler = init_handler;
   instance->init_arg = arg;
@@ -494,6 +497,9 @@ rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
       fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
       return -1;
     }
+    if (on_conn_close_handler == NULL) {
+      on_conn_close_handler = rio_def_on_conn_close_handler;
+    }
     preq->on_conn_close_handler = on_conn_close_handler;
     preq->read_handler = read_handler;
     preq->iocp = instance->iocp;
@@ -541,6 +547,10 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
     if ( (preq = rio_create_request_event(listenfd, instance->iocp, size_per_read) ) == NULL ) {
       fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
       return -1;
+    }
+
+    if (on_conn_close_handler == NULL) {
+      on_conn_close_handler = rio_def_on_conn_close_handler;
     }
     preq->on_conn_close_handler = on_conn_close_handler;
     preq->read_handler = read_handler;
@@ -639,6 +649,9 @@ static void rio_add_signal_handler(rio_signal_handler_pt signal_handler);
 static void rio_signal_backtrace(int sfd);
 static int rio_run_epoll(rio_instance_t *instance);
 static int rio_run_epoll_t(rio_instance_t *instance);
+static void rio_def_on_conn_close_handler(rio_request_t *req) {
+  /*Do nothing*/
+}
 
 void *rio_read_handler_spawn(void *req_);
 void *rio_read_tcp_handler_spawn(void *req_);
@@ -1254,10 +1267,6 @@ rio_signal_backtrace(int sfd) {
   exit(EXIT_FAILURE);
 }
 
-static void rio_def_On_conn_close_handler(rio_request_t *req) {
-  /*Do nothing*/
-}
-
 int
 rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int max_message_queue, rio_on_conn_close_pt on_conn_close_handler) {
   if (read_handler == NULL) {
@@ -1274,7 +1283,7 @@ rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 
   ev->read_handler = read_handler;
   if (on_conn_close_handler == NULL) {
-    on_conn_close_handler = rio_def_On_conn_close_handler;
+    on_conn_close_handler = rio_def_on_conn_close_handler;
   }
   ev->on_conn_close_handler = on_conn_close_handler;
   ev->max_message_queue = max_message_queue;
@@ -1305,7 +1314,7 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
   rio_event_t * ev = &instance->evts[instance->n++];
   ev->read_handler = read_handler;
   if (on_conn_close_handler == NULL) {
-    on_conn_close_handler = rio_def_On_conn_close_handler;
+    on_conn_close_handler = rio_def_on_conn_close_handler;
   }
   ev->on_conn_close_handler = on_conn_close_handler;
   ev->isudp = 0;

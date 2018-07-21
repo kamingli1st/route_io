@@ -410,7 +410,6 @@ SPAWN_CHILD_PROC:
     si.cb = sizeof(si);
     ZeroMemory( &g_pi, sizeof(g_pi) );
 
-
     TCHAR *child_cmd_str = (TCHAR*) malloc(sizeof_child_cmdline);
     ZeroMemory(child_cmd_str, sizeof_child_cmdline);
 

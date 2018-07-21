@@ -49,7 +49,6 @@ struct rio_request_s {
     int client_addr_len;
   };
   rio_state next_state;
-
   rio_buf_t *in_buff;
   rio_buf_t *out_buff;
   union {

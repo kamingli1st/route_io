@@ -3,6 +3,15 @@ project(route_io)
 
 set(PROJNAME routeio)
 
+IF (WIN32 OR MSVC OR MSYS OR MINGW)
+SET(RIO_COMPILE_WINDOWS TRUE)
+ELSEif(UNIX AND NOT APPLE)
+SET(RIO_COMPILE_LINUX TRUE)
+endif()
+
+if(DEFINED RIO_COMPILE_LINUX) 
+MESSAGE(STATUS "Unix Build ... ")
+
 IF (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 SET(CMAKE_INSTALL_INCLUDEDIR /usr/local/include)
 ENDIF(NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
@@ -19,7 +28,6 @@ target_link_libraries(route_handler PUBLIC pthread lfqueue)
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -Wall -Wstrict-prototypes -Wmissing-prototypes")
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wmissing-declarations -Wshadow -Wpointer-arith -Wcast-qual")
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wsign-compare -pedantic")
-
 
 ###############################################################################
 ## packaging ##################################################################
@@ -58,6 +66,25 @@ configure_file(
 
 add_custom_target(uninstall
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+endif()
+
+
+# if(DEFINED RIO_COMPILE_WINDOWS) 
+# MESSAGE(STATUS "Windows Build ...")
+
+# file(GLOB_RECURSE sources route_io.c route_io.h)
+# file(GLOB_RECURSE example_test route_io.c route_io.h route_sample.c)
+
+# # SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -static-libgcc")
+
+# add_executable(route_handler ${example_test})
+# target_link_libraries(route_handler PUBLIC static-libgcc ws2_32 wsock32 shlwapi)
+
+# add_library(${PROJNAME} SHARED ${sources})
+# target_link_libraries(${PROJNAME} static-libgcc ws2_32 wsock32 shlwapi)
+
+# endif()
+
 
 set(CPACK_PACKAGE_NAME "route_io")
 set(CPACK_PACKAGE_VERSION "1.0.0")

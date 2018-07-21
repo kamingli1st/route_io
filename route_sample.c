@@ -54,11 +54,11 @@ int main(void) {
 
   rio_instance_t * instance = rio_create_routing_instance(24, init_instance, NULL);
 #if defined _WIN32 || _WIN64 /*Windows*/
-  rio_add_udp_fd(instance, 12345, read_handler, 64, 1024, NULL);
+  rio_add_udp_fd(instance, 12345, read_handler, 64, 1024, on_conn_close_handler);
   rio_add_tcp_fd(instance, 8080, read_handler, 64, 1024, on_conn_close_handler);
   rio_start(instance);
 #else
-  rio_add_udp_fd(instance, 12345, read_handler, 1024, NULL);
+  rio_add_udp_fd(instance, 12345, read_handler, 1024, on_conn_close_handler);
   rio_add_tcp_fd(instance, 3232, read_handler, 64, on_conn_close_handler);
   rio_start(instance, 1);
 #endif

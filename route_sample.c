@@ -59,7 +59,7 @@ int main(void) {
   rio_start(instance);
 #else
   rio_add_udp_fd(instance, 12345, read_handler, 1024, NULL);
-  rio_add_tcp_fd(instance, 3232, read_handler, 64, NULL);
+  rio_add_tcp_fd(instance, 3232, read_handler, 64, on_conn_close_handler);
   rio_start(instance, 1);
 #endif
 

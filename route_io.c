@@ -329,34 +329,81 @@ RIO_UDP_MODE_DATA_READABLE:
 
 void
 rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
-  size_t outsz = RIO_STRLEN(output);
+  rio_buf_t *buf;
+  size_t outsz = RIO_STRLEN(output), curr_size, new_size;
   if (outsz == 0) {
     return ;
   }
-  rio_buf_t *buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
-  if (!buf) {
-    RIO_ERROR("malloc");
-    return;
+  if (req->out_buff == NULL) {
+    buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
+    if (!buf) {
+      RIO_ERROR("malloc");
+      return;
+    }
+    buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+    buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
+    buf->total_size = outsz;
+    req->out_buff = buf;
+  } else {
+    curr_size = rio_buf_size(req->out_buff);
+    if ( (curr_size + outsz) > req->out_buff->total_size ) {
+      new_size = (curr_size + outsz) * 2;
+      buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + new_size );
+      if (!buf) {
+        RIO_ERROR("malloc");
+        return;
+      }
+      buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
+      buf->end = ((u_char*) memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
+      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
+      buf->total_size = new_size;
+      RIO_FREE(req->out_buff);
+      req->out_buff = buf;
+    } else {
+      buf = req->out_buff;
+      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
+    }
   }
-  buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
-  buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
-  req->out_buff = buf;
 }
 
 void
-rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len) {
-  if (len == 0) {
+rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t outsz) {
+  rio_buf_t *buf;
+  size_t curr_size, new_size;
+  if (outsz == 0) {
     return ;
   }
-  rio_buf_t *buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + len + 1);
-  if (!buf) {
-    RIO_ERROR("malloc");
-    return;
+
+  if (req->out_buff == NULL) {
+    buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
+    if (!buf) {
+      RIO_ERROR("malloc");
+      return;
+    }
+    buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+    buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
+    buf->total_size = outsz;
+    req->out_buff = buf;
+  } else {
+    curr_size = rio_buf_size(req->out_buff);
+    if ( (curr_size + outsz) > req->out_buff->total_size ) {
+      new_size = (curr_size + outsz) * 2;
+      buf =(rio_buf_t*)  RIO_MALLOC(sizeof(rio_buf_t) + new_size);
+      if (!buf) {
+        RIO_ERROR("malloc");
+        return;
+      }
+      buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
+      buf->end = ((u_char*) memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
+      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
+      buf->total_size = new_size;
+      RIO_FREE(req->out_buff);
+      req->out_buff = buf;
+    } else {
+      buf = req->out_buff;
+      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
+    }
   }
-  buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
-  buf->end = ((u_char *)memcpy( buf->start, output, len)) + len ;
-  // *buf->end++ = '\n';
-  req->out_buff = buf;
 }
 
 static void
@@ -388,7 +435,7 @@ rio_create_routing_instance(int max_service_port, rio_init_handler_pt init_handl
   SIZE_T sizeof_cmdline = RIO_STRLEN(cmd_str);
   SIZE_T sizeof_childcmd = sizeof("routeio-child-proc") - 1;
   SIZE_T sizeof_child_cmdline;
-  // goto CONTINUE_CHILD_IOCP_PROCESS;
+//   goto CONTINUE_CHILD_IOCP_PROCESS;
   if (sizeof_cmdline > sizeof_childcmd) {
     TCHAR *p_cmd_str = cmd_str +  sizeof_cmdline - sizeof("routeio-child-proc");
 
@@ -555,6 +602,7 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
     preq->read_handler = read_handler;
     preq->isudp = 0;
     preq->ctx_val = NULL;
+    preq->out_buff = NULL;
   }
 
   return 0;

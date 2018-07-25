@@ -206,7 +206,6 @@ rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_re
   req->in_buff = in_buff;
   req->client_addr_len = sizeof(req->client_addr);
 //  ZeroMemory( &req->client_addr, req->client_addr_len );
-
   req->next_state = rio_READABLE;
   if (!PostQueuedCompletionStatus(iocp_port, 0, (ULONG_PTR)COMPLETION_KEY_IO, &req->ovlp)) {
     if ((rc = WSAGetLastError()) != WSA_IO_PENDING)

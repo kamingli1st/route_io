@@ -46,6 +46,9 @@ static void rio_def_on_conn_close_handler(rio_request_t *req) {
 }
 static HANDLE master_shutdown_ev = 0;
 
+unsigned __stdcall rio_udp_request_thread(void *);
+unsigned __stdcall rio_tcp_request_thread(void *);
+
 static void
 rio_on_accept(rio_request_t *req) {
   req->next_state = rio_READABLE;
@@ -90,12 +93,13 @@ rio_process_and_write(rio_request_t *req,  size_t n_byte_read) {
     rio_peer_close(req);
   } else {
     req->in_buff->end = req->in_buff->start + n_byte_read;
-    req->read_handler(req);
-    // req->out_buff = req->in_buff;
-    if ( req->out_buff ) {
-      rio_writing_buf(req, req->out_buff);
+    unsigned tid;
+    HANDLE thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_tcp_request_thread, req, 0, &tid);
+    if (thread_hdl == 0) {
+      fprintf(stderr, "Error while creating the thread: %s\r\n", strerror(errno) );
     }
-    req->in_buff->end = req->in_buff->start;
+    /*Detach thread*/
+    CloseHandle(thread_hdl);
   }
 }
 
@@ -211,7 +215,7 @@ rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_re
   return req;
 }
 
-static unsigned __stdcall
+unsigned __stdcall
 rio_udp_request_thread(void *arg) {
   int rc;
   DWORD out_sz;
@@ -239,6 +243,17 @@ rio_udp_request_thread(void *arg) {
       }
     }
   }
+  return 0;
+}
+
+unsigned __stdcall
+rio_tcp_request_thread(void *arg) {
+  rio_request_t *req = (rio_request_t*)arg;
+  req->read_handler(req);
+  if ( req->out_buff ) {
+    rio_writing_buf(req, req->out_buff);
+  }
+  // req->in_buff->end = req->in_buff->start;
   return 0;
 }
 
@@ -391,7 +406,7 @@ rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t outs
     curr_size = rio_buf_size(req->out_buff);
     if ( (curr_size + outsz) > req->out_buff->total_size ) {
       new_size = (curr_size + outsz) * 2;
-      buf =(rio_buf_t*)  RIO_MALLOC(sizeof(rio_buf_t) + new_size);
+      buf = (rio_buf_t*)  RIO_MALLOC(sizeof(rio_buf_t) + new_size);
       if (!buf) {
         RIO_ERROR("malloc");
         return;

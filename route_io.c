@@ -435,7 +435,7 @@ rio_create_routing_instance(int max_service_port, rio_init_handler_pt init_handl
   SIZE_T sizeof_cmdline = RIO_STRLEN(cmd_str);
   SIZE_T sizeof_childcmd = sizeof("routeio-child-proc") - 1;
   SIZE_T sizeof_child_cmdline;
-//   goto CONTINUE_CHILD_IOCP_PROCESS;
+//  goto CONTINUE_CHILD_IOCP_PROCESS;
   if (sizeof_cmdline > sizeof_childcmd) {
     TCHAR *p_cmd_str = cmd_str +  sizeof_cmdline - sizeof("routeio-child-proc");
 

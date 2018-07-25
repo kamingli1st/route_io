@@ -76,7 +76,10 @@ rio_peer_close(rio_request_t *req) {
   req->on_conn_close_handler(req);
   req->ctx_val = NULL;
   rio_conn_closing(req);
-  // req->out_buff = NULL;
+  if (req->out_buff) {
+    RIO_FREE(req->out_buff);
+    req->out_buff = NULL;
+  }
 //  shutdown( req->sock, SD_BOTH );
 //  closesocket(req->sock );
 }

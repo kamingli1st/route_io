@@ -65,7 +65,6 @@ typedef struct {
   HANDLE iocp;
   rio_init_handler_pt init_handler;
   void* init_arg;
-  size_t max_port;
 } rio_instance_t;
 
 #else
@@ -73,7 +72,6 @@ typedef struct {
 #include <stdlib.h>
 #include <stdint.h>
 #include <netinet/in.h>
-#include <lfsaq/lfqueue.h>
 
 typedef struct rio_instance_s rio_instance_t;
 typedef struct rio_request_s rio_request_t;
@@ -89,35 +87,41 @@ typedef struct rio_buf_s {
   size_t total_size;
 } rio_buf_t;
 
-typedef struct {
-  int sockfd;
-  struct sockaddr_in client_addr;
-  socklen_t client_addrlen;
-  unsigned isudp: 1;
-  unsigned is_listener: 1;
-  union {
-    int max_message_queue;
-    lfqueue_t out_queue;
-    rio_request_t *out_req;
-  };
-  rio_instance_t *instance;
-  rio_read_handler_pt read_handler;
-  rio_on_conn_close_pt on_conn_close_handler;
-} rio_event_t;
+// typedef struct {
+//   int sockfd;
+//   struct sockaddr_in client_addr;
+//   socklen_t client_addrlen;
+//   unsigned isudp: 1;
+//   // unsigned is_listener: 1;
+//   // union {
+//   //   int max_message_queue;
+//   //   lfqueue_t out_queue;
+//   //   rio_request_t *out_req;
+//   // };
+//   rio_request_t *req;
+//   rio_instance_t *instance;
+//   rio_read_handler_pt read_handler;
+//   rio_on_conn_close_pt on_conn_close_handler;
+// } rio_event_t;
 
 struct rio_request_s {
   int sockfd;
+  struct sockaddr_in client_addr;
+  socklen_t client_addr_len;
+  unsigned isudp: 1;
   rio_buf_t *in_buff;
   rio_buf_t *out_buff;
-  rio_event_t *event;
   void* ctx_val;
-  // rio_instance_t *instance;
+  rio_instance_t *instance;
+  rio_read_handler_pt read_handler;
+  rio_on_conn_close_pt on_conn_close_handler;
+  struct epoll_event *epev;
 };
 
 struct rio_instance_s {
   int epfd;
-  int nevents, n;
-  rio_event_t *evts;
+  int nevents;
+  // rio_event_t *evts;
   struct epoll_event *ep_events;
   size_t ep_events_sz;
   rio_init_handler_pt init_handler;
@@ -128,17 +132,18 @@ struct rio_instance_s {
 
 extern void rio_write_output_buffer(rio_request_t *req, unsigned char* output);
 extern void rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len);
-extern rio_instance_t* rio_create_routing_instance(int max_service_port, rio_init_handler_pt init_handler, void *arg );
-#if defined _WIN32 || _WIN64
+extern rio_instance_t* rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg );
 extern int rio_start(rio_instance_t *instance);
+#if defined _WIN32 || _WIN64
 extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
                           SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
 extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
                           SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
 #else
-extern int rio_start(rio_instance_t *instance, int with_threads);
-extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int max_message_queue, rio_on_conn_close_pt on_conn_close_handler);
-extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog, rio_on_conn_close_pt on_conn_close_handler);
+extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler,
+                          rio_on_conn_close_pt on_conn_close_handler);
+extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
+                          rio_on_conn_close_pt on_conn_close_handler);
 
 #endif
 

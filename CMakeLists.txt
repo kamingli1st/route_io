@@ -22,7 +22,7 @@ file(GLOB_RECURSE sources route_io.c route_io.h)
 file(GLOB_RECURSE example_test route_io.c route_io.h route_sample.c)
 
 add_executable(route_handler ${example_test})
-target_link_libraries(route_handler PUBLIC pthread lfqueue)
+target_link_libraries(route_handler PUBLIC pthread)
 
 
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -Wall -Wstrict-prototypes -Wmissing-prototypes")
@@ -33,10 +33,10 @@ SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wsign-compare -pedantic")
 ## packaging ##################################################################
 ###############################################################################
 add_library(${PROJNAME}.static STATIC ${sources})
-target_link_libraries(${PROJNAME}.static pthread lfqueue)
+target_link_libraries(${PROJNAME}.static pthread)
 set_target_properties(${PROJNAME}.static PROPERTIES OUTPUT_NAME ${PROJNAME})
 add_library(${PROJNAME} SHARED ${sources})
-target_link_libraries(${PROJNAME} pthread lfqueue)
+target_link_libraries(${PROJNAME} pthread)
 
 
 # link_directories(/usr/local/lib /usr/lib)

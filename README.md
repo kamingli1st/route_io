@@ -4,11 +4,6 @@ async route tcp/udp data to your c/c++ function, create one instance to handler 
 
 ## For Linux OS build
 
-## Prerequisition Installed
-
-lock-free-queue-and-stack -- https://github.com/Taymindis/lock-free-stack-and-queue.git
-
-
 ## Installation
 
 ```bash

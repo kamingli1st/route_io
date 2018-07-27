@@ -6,7 +6,7 @@
 
 /***Compile by ***/
 /** cd build **/
-/** g++ -DSPDLOG_FMT_PRINTF -std=c++11 ../sample_with_spdlog.cpp  -lsrh -pthread **/
+/** g++ -DSPDLOG_FMT_PRINTF -std=c++11 -I/home/booking/clib/spdlog-0.17.0/include ../sample_with_spdlog.cpp  -lrouteio **/
 
 static std::shared_ptr<spdlog::logger> file_logger = 0;
 void read_handler(rio_request_t *req);
@@ -21,12 +21,12 @@ void init_logger_in_instance(void *arg) {
 }
 
 void read_handler(rio_request_t *req) {
+    file_logger->info("%.*s", (int) (req->in_buff->end - req->in_buff->start), req->in_buff->start);
+    // file_logger->flush();
 
-    if (strncmp( (char*)req->in_buff->start, "log ", 4) == 0) {
-        file_logger->info("%.*s", (int) (req->in_buff->end - req->in_buff->start), req->in_buff->start);
-        // file_logger->flush();
-    }
     rio_write_output_buffer_l(req, req->in_buff->start, (req->in_buff->end - req->in_buff->start));
+
+    rio_write_output_buffer(req, (unsigned char*)"\n"); /*append new line for termination if needed*/
 }
 
 void on_conn_close_handler(rio_request_t *req) {

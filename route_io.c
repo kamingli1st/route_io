@@ -8,6 +8,7 @@
 #include <ws2tcpip.h>
 #include <mstcpip.h>
 
+#pragma warning(disable:4996)
 
 #define ACCEPT_ADDRESS_LENGTH      ((sizeof( struct sockaddr_in) + 16))
 #define DEFAULT_READ_BUFFER_SIZE   1024
@@ -96,7 +97,7 @@ rio_process_and_write(rio_request_t *req,  size_t n_byte_read) {
     unsigned tid;
     HANDLE thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_tcp_request_thread, req, 0, &tid);
     if (thread_hdl == 0) {
-      fprintf(stderr, "Error while creating the thread: %s\r\n", strerror(errno) );
+      fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
     }
     /*Detach thread*/
     CloseHandle(thread_hdl);
@@ -315,7 +316,7 @@ RIO_UDP_MODE_DATA_READABLE:
             unsigned udpthreadid;
             HANDLE udp_thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_udp_request_thread, p_req, 0, &udpthreadid);
             if (udp_thread_hdl == 0) {
-              fprintf(stderr, "Error while creating the thread: %s\r\n", strerror(errno) );
+              fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
             }
             /*Detach thread*/
             CloseHandle(udp_thread_hdl);
@@ -452,7 +453,7 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg ) {
   SIZE_T sizeof_cmdline = RIO_STRLEN(cmd_str);
   SIZE_T sizeof_childcmd = sizeof("routeio-child-proc") - 1;
   SIZE_T sizeof_child_cmdline;
-//  goto CONTINUE_CHILD_IOCP_PROCESS;
+  // goto CONTINUE_CHILD_IOCP_PROCESS;
   if (sizeof_cmdline > sizeof_childcmd) {
     TCHAR *p_cmd_str = cmd_str +  sizeof_cmdline - sizeof("routeio-child-proc");
 

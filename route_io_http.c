@@ -28,7 +28,7 @@ rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
         if ( memcmp(start, pattern, ptnlen) == 0) {
           return start;
         }
-        *start++;
+        start++;
         len--;
         continue;
       }

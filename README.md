@@ -62,6 +62,12 @@ int main(void) {
 
 ## for Windows os build
 
+### Recommend to use VS2017 to build
+
+#### Add the sources file route_io.c route_io_http.c route_io.h into VS2017 project solution.
+
+Alternatively, 
+
 #### Download the Dev-C++ IDE - https://sourceforge.net/projects/orwelldevcpp/
 
 #### go to route_io directory and open routeio_windows.dev, and build it from Dev-C++ IDE.

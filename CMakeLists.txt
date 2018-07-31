@@ -18,11 +18,11 @@ ENDIF(NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 
 include_directories(/usr/local/include /usr/include)
 
-file(GLOB_RECURSE sources route_io.c route_io.h)
-file(GLOB_RECURSE example_test route_io.c route_io.h route_sample.c)
+file(GLOB_RECURSE sources route_io.c route_io_http.c route_io.h)
+file(GLOB_RECURSE example_test route_io.c route_io_http.c route_io.h route_echoback_example.c)
 
-add_executable(route_handler ${example_test})
-target_link_libraries(route_handler PUBLIC pthread)
+add_executable(route_echoback_handler ${example_test})
+target_link_libraries(route_echoback_handler PUBLIC pthread)
 
 
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -Wall -Wstrict-prototypes -Wmissing-prototypes")
@@ -73,12 +73,12 @@ endif()
 # MESSAGE(STATUS "Windows Build ...")
 
 # file(GLOB_RECURSE sources route_io.c route_io.h)
-# file(GLOB_RECURSE example_test route_io.c route_io.h route_sample.c)
+# file(GLOB_RECURSE example_test route_io.c route_io.h route_echoback_example.c)
 
 # # SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -static-libgcc")
 
-# add_executable(route_handler ${example_test})
-# target_link_libraries(route_handler PUBLIC static-libgcc ws2_32 wsock32 shlwapi)
+# add_executable(route_echoback_handler ${example_test})
+# target_link_libraries(route_echoback_handler PUBLIC static-libgcc ws2_32 wsock32 shlwapi)
 
 # add_library(${PROJNAME} SHARED ${sources})
 # target_link_libraries(${PROJNAME} static-libgcc ws2_32 wsock32 shlwapi)

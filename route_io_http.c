@@ -9,13 +9,37 @@ if( (request->out_buff == NULL) || strncmp( (const char*) request->out_buff->sta
 }
 
 #define rio_check_http_if_content_length(request, len) \
-if(!strstr( (const char*) request->out_buff->start, "Content-Length:")) { \
+if(! rio_memstr( request->out_buff->start, request->out_buff->end, "Content-Length:")) { \
 char content_len_str[50]; \
 snprintf(content_len_str, 50, "Content-Length: %zu", len); \
 rio_write_http_header_2(request, content_len_str); \
 }
 
-int rio_write_http_status(rio_request_t * request, int statuscode) {
+unsigned char*
+rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
+  size_t len = end - start, ptnlen = strlen(pattern);
+  if (len) {
+    while ( (start = 
+      (unsigned char*) memchr(start, 
+        (int)pattern[0], 
+        len) ) ) {
+      len = end - start;
+      if (len >= ptnlen) {
+        if ( memcmp(start, pattern, ptnlen) == 0) {
+          return start;
+        }
+        *start++;
+        len--;
+        continue;
+      }
+      return NULL;
+    }
+  }
+  return NULL;
+}
+
+int
+rio_write_http_status(rio_request_t * request, int statuscode) {
   if (request->out_buff) {
     fprintf(stderr, "%s\n", "Invalid Http status code should be write first"); \
     return -1;
@@ -140,10 +164,12 @@ int rio_write_http_status(rio_request_t * request, int statuscode) {
     fprintf(stderr, "%s\n", "No http status code found, please write out customly");
     return -1;
   }
+  rio_write_output_buffer(request, (unsigned char*)"\r\n");
   return 0;
 }
 
-int rio_write_http_header(rio_request_t * request, const char* key, const char *val) {
+int
+rio_write_http_header(rio_request_t * request, char* key, char *val) {
   rio_check_http_header_structure(request);
   rio_write_output_buffer(request, (unsigned char*) key);
   rio_write_output_buffer(request, (unsigned char*) ": ");
@@ -152,7 +178,8 @@ int rio_write_http_header(rio_request_t * request, const char* key, const char *
   return 0;
 }
 
-int rio_write_http_header_2(rio_request_t * request, const char* keyval) {
+int
+rio_write_http_header_2(rio_request_t * request, char* keyval) {
   rio_check_http_header_structure(request);
   rio_write_output_buffer(request, (unsigned char*) keyval);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
@@ -160,14 +187,16 @@ int rio_write_http_header_2(rio_request_t * request, const char* keyval) {
 }
 
 
-int rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len) {
+int
+rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len) {
   rio_check_http_header_structure(request);
   rio_write_output_buffer_l(request, (unsigned char*) keyval, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   return 0;
 }
 
-int rio_write_http_content(rio_request_t * request, const char* content) {
+int
+rio_write_http_content(rio_request_t * request, char* content) {
   size_t len;
   rio_check_http_header_structure(request);
   len = strlen(content);
@@ -177,10 +206,38 @@ int rio_write_http_content(rio_request_t * request, const char* content) {
   return 0;
 }
 
-int rio_write_http_content_2(rio_request_t * request, char* content, size_t len) {
+int
+rio_write_http_content_2(rio_request_t * request, char* content, size_t len) {
   rio_check_http_header_structure(request);
   rio_check_http_if_content_length(request, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   rio_write_output_buffer_l(request, (unsigned char*) content, len);
   return 0;
+}
+
+void
+rio_http_getpath(rio_request_t *req, rio_buf_t *buf) {
+  size_t buflen;
+  rio_buf_t *pbuf = req->in_buff;
+  if (pbuf) {
+    buflen = pbuf->end - pbuf->start;
+    if ( (buf->start = (unsigned char*) memchr(pbuf->start, '/', buflen) ) && (buf->end = (unsigned char*) memchr(buf->start, ' ', pbuf->end - buf->start )) ) {
+      buf->total_size = buf->end - buf->start;
+      return;
+    }
+  }
+  buf->total_size = 0;
+}
+
+void
+rio_http_getbody(rio_request_t *req, rio_buf_t *buf) {
+  rio_buf_t *pbuf = req->in_buff;
+  if (pbuf) {
+    if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, "\r\n\r\n") ) || (buf->start = rio_memstr(pbuf->start, pbuf->end, "\n\n") )) {
+      buf->end = pbuf->end;
+      buf->total_size = buf->end - buf->start;
+      return;
+    }
+  }
+  buf->total_size = 0;
 }

@@ -882,7 +882,7 @@ REREAD:
     if ((bytes_read = recv( fd , buf->end, RIO_DEF_BUF_SIZE, 0)) > 0 ) {
       buf->end += bytes_read;
       size_t curr_size = buf->end - buf->start;
-      if ( curr_size + RIO_DEF_BUF_SIZE >= buf->total_size ) {
+      if ( curr_size + RIO_DEF_BUF_SIZE > buf->total_size ) {
         new_buf = RIO_MALLOC(sizeof(rio_buf_t) + buf->total_size * 2);
         if (!new_buf) {
           RIO_ERROR("Error creating thread\n");
@@ -918,7 +918,7 @@ REREAD:
   }
 
   if (buf) {
-    buf->start = buf->end;
+    buf->end = buf->start;
   }
   if (req->out_buff) {
     RIO_FREE(req->out_buff);

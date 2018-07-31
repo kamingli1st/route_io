@@ -149,22 +149,28 @@ extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_p
 #endif
 
 /** For HTTP OUTPUT **/
-#define rio_http_xform_header "Content-Type: application/x-www-form-urlencoded\r\n"
-#define rio_http_jsonp_header "Content-Type: application/javascript\r\n"
-#define rio_http_json_header "Content-Type: application/json\r\n"
-#define rio_http_textplain_header "Content-Type: text/plain\r\n"
+#define rio_http_xform_header "Content-Type: application/x-www-form-urlencoded"
+#define rio_http_jsonp_header "Content-Type: application/javascript"
+#define rio_http_json_header "Content-Type: application/json"
+#define rio_http_textplain_header "Content-Type: text/plain"
+
+extern unsigned char* rio_memstr(unsigned char * start, unsigned char *end, char *pattern);
 
 extern int rio_write_http_status(rio_request_t * request, int statuscode);
 
-extern int rio_write_http_header(rio_request_t * request, const char* key, const char *val);
+extern int rio_write_http_header(rio_request_t * request, char* key, char *val);
 
-extern int rio_write_http_header_2(rio_request_t * request, const char* keyval);
+extern int rio_write_http_header_2(rio_request_t * request, char* keyval);
 
 extern int rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len);
 
-extern int rio_write_http_content(rio_request_t * request, const char* content);
+extern int rio_write_http_content(rio_request_t * request,  char* content);
 
 extern int rio_write_http_content_2(rio_request_t * request, char* content, size_t len);
+
+extern void rio_http_getpath(rio_request_t *req, rio_buf_t *buf);
+
+extern void rio_http_getbody(rio_request_t *req, rio_buf_t *buf);
 
 #ifdef __cplusplus
 }

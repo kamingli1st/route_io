@@ -18,6 +18,10 @@ void init_logger_in_instance(void *arg) {
     auto rotating = std::make_shared<spdlog::sinks::rotating_file_sink_mt> ("mylog.log", 1024 * 1024, 5);
     file_logger = spdlog::create_async("my_logger", rotating, 8192,
                                        spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::milliseconds{10}/*flush interval*/, nullptr);
+//  size_t q_size = 8192; // queue size must be power of 2
+//  spdlog::set_async_mode(q_size,spdlog::async_overflow_policy::block_retry, nullptr, std::chrono::milliseconds{10}, nullptr);
+//	spdlog::set_async_mode(q_size);	
+//	file_logger = spdlog::rotating_logger_mt("async_file_logger", "mylog.log", 1024 * 1024, 5);
 }
 
 void read_handler(rio_request_t *req) {
@@ -38,8 +42,7 @@ int main(int, char* []) {
         rio_instance_t * instance = rio_create_routing_instance(init_logger_in_instance, NULL);
 #if defined _WIN32 || _WIN64 /*Windows*/
         rio_add_udp_fd(instance, 12345, read_handler, 64, 1024, on_conn_close_handler);
-        rio_add_tcp_fd(instance, 8080, read_handler, 64, 1024, on_conn_close_handler);
-        rio_start(instance);
+        rio_add_tcp_fd(instance, 3232, read_handler, 64, 1024, on_conn_close_handler);
 #else
         rio_add_udp_fd(instance, 12345, read_handler, on_conn_close_handler);
         rio_add_tcp_fd(instance, 3232, read_handler, 64, on_conn_close_handler);

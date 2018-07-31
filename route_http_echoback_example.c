@@ -33,7 +33,8 @@ void read_handler(rio_request_t *req) {
   rio_write_http_status(req, 200);
   rio_write_http_header_2(req, rio_http_textplain_header);
   rio_write_http_content_2(req, (char*) path.start, path.total_size);
-  // printf("%.*s\n", (int)rio_buf_size(req->out_buff), req->out_buff->start );
+  /** For debug **/
+//   printf("%.*s\n", (int)rio_buf_size(req->out_buff), req->out_buff->start );
 }
 
 void on_conn_close_handler(rio_request_t *req) {
@@ -49,10 +50,10 @@ int main(void) {
   rio_instance_t * instance = rio_create_routing_instance(init_instance, NULL);
 #if defined _WIN32 || _WIN64 /*Windows*/
   rio_add_udp_fd(instance, 12345, read_handler, 64, 1024, on_conn_close_handler);
-  rio_add_tcp_fd(instance, 8080, read_handler, 64, 1024, on_conn_close_handler);
+  rio_add_http_fd(instance, 3232, read_handler, 64, 1024, on_conn_close_handler);
 #else
   rio_add_udp_fd(instance, 12345, read_handler, on_conn_close_handler);
-  rio_add_tcp_fd(instance, 3232, read_handler, 64, on_conn_close_handler);
+  rio_add_http_fd(instance, 3232, read_handler, 64, on_conn_close_handler);
 #endif
   rio_start(instance);
 

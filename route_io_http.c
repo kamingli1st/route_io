@@ -8,12 +8,21 @@ if( (request->out_buff == NULL) || strncmp( (const char*) request->out_buff->sta
   return -1;\
 }
 
+#if defined _WIN32 || _WIN64
+#define rio_check_http_if_content_length(request, len) \
+if(! rio_memstr( request->out_buff->start, request->out_buff->end,(char*) "Content-Length:")) { \
+char content_len_str[50]; \
+snprintf(content_len_str, 50, "Content-Length: %Iu", len); \
+rio_write_http_header_2(request, content_len_str); \
+}
+#else
 #define rio_check_http_if_content_length(request, len) \
 if(! rio_memstr( request->out_buff->start, request->out_buff->end,(char*) "Content-Length:")) { \
 char content_len_str[50]; \
 snprintf(content_len_str, 50, "Content-Length: %zu", len); \
 rio_write_http_header_2(request, content_len_str); \
 }
+#endif
 
 unsigned char*
 rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {

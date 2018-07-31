@@ -45,8 +45,8 @@ static int rio_run_iocp_worker(rio_instance_t *instance);
 static void rio_def_on_conn_close_handler(rio_request_t *req) {
   /*Do nothing*/
 }
-static HANDLE master_shutdown_ev = 0;
 
+static HANDLE master_shutdown_ev = 0;
 unsigned __stdcall rio_udp_request_thread(void *);
 unsigned __stdcall rio_tcp_request_thread(void *);
 

@@ -9,7 +9,7 @@ if( (request->out_buff == NULL) || strncmp( (const char*) request->out_buff->sta
 }
 
 #define rio_check_http_if_content_length(request, len) \
-if(! rio_memstr( request->out_buff->start, request->out_buff->end, "Content-Length:")) { \
+if(! rio_memstr( request->out_buff->start, request->out_buff->end,(char*) "Content-Length:")) { \
 char content_len_str[50]; \
 snprintf(content_len_str, 50, "Content-Length: %zu", len); \
 rio_write_http_header_2(request, content_len_str); \
@@ -233,7 +233,7 @@ void
 rio_http_getbody(rio_request_t *req, rio_buf_t *buf) {
   rio_buf_t *pbuf = req->in_buff;
   if (pbuf) {
-    if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, "\r\n\r\n") ) || (buf->start = rio_memstr(pbuf->start, pbuf->end, "\n\n") )) {
+    if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*)"\r\n\r\n") ) || (buf->start = rio_memstr(pbuf->start, pbuf->end,(char*) "\n\n") )) {
       buf->end = pbuf->end;
       buf->total_size = buf->end - buf->start;
       return;

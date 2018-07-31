@@ -70,9 +70,7 @@ Alternatively,
 
 #### Download the Dev-C++ IDE - https://sourceforge.net/projects/orwelldevcpp/
 
-#### go to route_io directory and open routeio_windows.dev, and build it from Dev-C++ IDE.
-
-#### You can use any IDE/build tools as you wish, just add route_io.c route_io.h to your project
+#### You can use any IDE/build tools as you wish, just add route_io.c route_io_http.c route_io.h to your project
 
 
 

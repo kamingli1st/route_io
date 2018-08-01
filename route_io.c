@@ -64,7 +64,7 @@ rio_on_recv(rio_request_t *req) {
               (char*)&req->listenfd, sizeof(SOCKET) );
 
   req->next_state = rio_AFT_READ_AND_WRITABLE;
-  ReadFile( (HANDLE)req->sock, req->in_buff->start, req->in_buff->total_size, 0, (OVERLAPPED*)req );
+  ReadFile( (HANDLE)req->sock, req->in_buff->start, (DWORD) req->in_buff->total_size, 0, (OVERLAPPED*)req );
 }
 
 static void
@@ -141,7 +141,7 @@ rio_on_iocp(rio_request_t *req, DWORD nbytes) {
     }
     req->next_state = rio_READABLE;
     req->next_state = rio_AFT_READ_AND_WRITABLE;
-    ReadFile( (HANDLE)req->sock, req->in_buff->start, req->in_buff->total_size, 0, (OVERLAPPED*)req );
+    ReadFile( (HANDLE)req->sock, req->in_buff->start,(DWORD) req->in_buff->total_size, 0, (OVERLAPPED*)req );
     break;
   case rio_PEER_CLOSED:
     rio_after_close(req);
@@ -218,20 +218,20 @@ rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_re
 unsigned __stdcall
 rio_udp_request_thread(void *arg) {
   int rc;
-  DWORD out_sz;
+  SIZE_T out_sz;
   WSABUF udpbuf;
   rio_request_t *req = (rio_request_t*)arg;
   req->read_handler(req);
   if (req->out_buff) {
     if ( (out_sz = rio_buf_size(req->out_buff)) ) {
       udpbuf.buf = (char*) req->out_buff->start;
-      udpbuf.len = out_sz;
+      udpbuf.len = (ULONG) out_sz;
       req->next_state = rio_DONE_WRITE;
       if (WSASendTo(req->listenfd, &udpbuf, 1,
-                    &out_sz, 0, (SOCKADDR *) &req->client_addr,
+                   (LPDWORD) &out_sz, 0, (SOCKADDR *) &req->client_addr,
                     req->client_addr_len, &req->ovlp, NULL) != 0 ) {
         if ((rc = WSAGetLastError()) != WSA_IO_PENDING) {
-          fprintf(stderr, "WSARecvFrom error:%d, sock:%d, bytesRead:%d\r\n", rc, req->listenfd, out_sz);
+          fprintf(stderr, "WSARecvFrom error:%d, sock:%lld, bytesRead:%lld\r\n", rc, req->listenfd, out_sz);
         }
       }
     }
@@ -299,12 +299,12 @@ RIO_UDP_MODE_DATA_READABLE:
         switch (p_req->next_state) {
         case rio_READABLE:
           udpbuf.buf = (char*) p_req->in_buff->start;
-          udpbuf.len = p_req->in_buff->total_size;
+          udpbuf.len = (ULONG) p_req->in_buff->total_size;
           if (WSARecvFrom(p_req->listenfd, &udpbuf, 1, (LPDWORD)&nbytes,
                           (LPDWORD)&udpflag, (struct sockaddr*)&p_req->client_addr,
                           &p_req->client_addr_len, &p_req->ovlp, NULL) != 0) {
             if ((rc_status = WSAGetLastError()) != WSA_IO_PENDING) {
-              fprintf(stderr, "WSARecvFrom error:%d, sock:%d, bytesRead:%d\r\n", rc_status, p_req->listenfd, nbytes);
+              fprintf(stderr, "WSARecvFrom error:%d, sock:%lld, bytesRead:%d\r\n", rc_status, p_req->listenfd, nbytes);
             }
           }
           p_req->next_state = rio_AFT_READ_AND_WRITABLE;
@@ -450,14 +450,15 @@ rio_instance_t*
 rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg ) {
   rio_instance_t *instance;
   TCHAR *cmd_str = GetCommandLine();
-  SIZE_T sizeof_cmdline = RIO_STRLEN(cmd_str);
-  SIZE_T sizeof_childcmd = sizeof("routeio-child-proc") - 1;
+  TCHAR *child_cmd_str = L"routeio-child-proc";
+  SIZE_T sizeof_cmdline = wcslen(cmd_str);
+  SIZE_T sizeof_childcmd = wcslen(child_cmd_str);
   SIZE_T sizeof_child_cmdline;
   // goto CONTINUE_CHILD_IOCP_PROCESS;
   if (sizeof_cmdline > sizeof_childcmd) {
     TCHAR *p_cmd_str = cmd_str +  sizeof_cmdline - sizeof("routeio-child-proc");
 
-    if (strstr(p_cmd_str, "routeio-child-proc")) {
+    if (wcsstr(p_cmd_str, L"routeio-child-proc")) {
       goto CONTINUE_CHILD_IOCP_PROCESS;
     } else {
       goto SPAWN_CHILD_PROC;
@@ -470,7 +471,6 @@ SPAWN_CHILD_PROC:
     signal(SIGINT, rio_interrupt_handler);
     sizeof_child_cmdline  = (sizeof_cmdline + sizeof_childcmd) * sizeof(TCHAR);
     STARTUPINFO si;
-    HANDLE child;
     ZeroMemory( &si, sizeof(si) );
     si.cb = sizeof(si);
     ZeroMemory( &g_pi, sizeof(g_pi) );
@@ -478,7 +478,7 @@ SPAWN_CHILD_PROC:
     TCHAR *child_cmd_str = (TCHAR*) malloc(sizeof_child_cmdline);
     ZeroMemory(child_cmd_str, sizeof_child_cmdline);
 
-    sprintf(child_cmd_str, "%s %s", cmd_str, "routeio-child-proc");
+	swprintf(child_cmd_str, sizeof_child_cmdline, L"%s routeio-child-proc", cmd_str);
 
 STREAM_RESTART:
     if ( CreateProcess(
@@ -493,6 +493,8 @@ STREAM_RESTART:
            &si,
            &g_pi)  == 0) {
       RIO_ERROR("CreateProcess failed\n");
+	  printf("%ls", child_cmd_str);
+	  Sleep(2000);
       ExitProcess(0);
     }
     fprintf(stderr, "%s\n", "Press Ctrl-C to terminate the process....");
@@ -527,7 +529,7 @@ CONTINUE_CHILD_IOCP_PROCESS:
 int
 rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
                SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler) {
-  int i, optval = 1, rc;
+  int i, optval = 1;
   rio_request_t *preq;
   SOCKET listenfd;
   if ((listenfd = socket(AF_INET , SOCK_DGRAM , 0 )) == INVALID_SOCKET) {
@@ -630,7 +632,6 @@ rio_start(rio_instance_t *instance) {
   TCHAR *cmd_str = GetCommandLine();
   SIZE_T sizeof_cmdline = RIO_STRLEN(cmd_str);
   SIZE_T sizeof_childcmd = sizeof("routeio-child-proc") - 1;
-  SIZE_T sizeof_child_cmdline;
   if (instance->init_handler) {
     instance->init_handler(instance->init_arg);
   }

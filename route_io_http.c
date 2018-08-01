@@ -242,7 +242,13 @@ void
 rio_http_getbody(rio_request_t *req, rio_buf_t *buf) {
   rio_buf_t *pbuf = req->in_buff;
   if (pbuf) {
-    if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*)"\r\n\r\n") ) || (buf->start = rio_memstr(pbuf->start, pbuf->end,(char*) "\n\n") )) {
+    if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*)"\r\n\r\n")) ) {
+      buf->start += 4;
+      buf->end = pbuf->end;
+      buf->total_size = buf->end - buf->start;
+      return;
+    } else if( (buf->start = rio_memstr(pbuf->start, pbuf->end,(char*) "\n\n") ) ) {
+      buf->start += 2;
       buf->end = pbuf->end;
       buf->total_size = buf->end - buf->start;
       return;

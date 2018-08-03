@@ -35,13 +35,13 @@ sudo make uninstall
 ```c
 
 void init_instance(void *arg);
-void read_data(rio_request_t *req);
+void read_handler(rio_request_t *req);
 
 void init_instance(void *arg) {
   printf("%s\n", "start instance");
 }
 
-void read_data(rio_request_t *req) {
+void read_handler(rio_request_t *req) {
   printf("preparing echo back %.*s\n", (int) (req->in_buff->end - req->in_buff->start), req->in_buff->start);
   rio_write_output_buffer_l(req, req->in_buff->start, (req->in_buff->end - req->in_buff->start));
 }

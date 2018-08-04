@@ -28,10 +28,10 @@ unsigned char*
 rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
   size_t len = end - start, ptnlen = strlen(pattern);
   if (len) {
-    while ( (start = 
-      (unsigned char*) memchr(start, 
-        (int)pattern[0], 
-        len) ) ) {
+    while ( (start =
+               (unsigned char*) memchr(start,
+                                       (int)pattern[0],
+                                       len) ) ) {
       len = end - start;
       if (len >= ptnlen) {
         if ( memcmp(start, pattern, ptnlen) == 0) {
@@ -47,11 +47,11 @@ rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
   return NULL;
 }
 
-int
+rio_bool_t
 rio_write_http_status(rio_request_t * request, int statuscode) {
   if (request->out_buff) {
     fprintf(stderr, "%s\n", "Invalid Http status code should be write first"); \
-    return -1;
+    return rio_false;
   }
 
   switch (statuscode) {
@@ -171,40 +171,40 @@ rio_write_http_status(rio_request_t * request, int statuscode) {
     break;
   default:
     fprintf(stderr, "%s\n", "No http status code found, please write out customly");
-    return -1;
+    return rio_false;
   }
   rio_write_output_buffer(request, (unsigned char*)"\r\n");
-  return 0;
+  return rio_true;
 }
 
-int
+rio_bool_t
 rio_write_http_header(rio_request_t * request, char* key, char *val) {
   rio_check_http_header_structure(request);
   rio_write_output_buffer(request, (unsigned char*) key);
   rio_write_output_buffer(request, (unsigned char*) ": ");
   rio_write_output_buffer(request, (unsigned char*) val);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
-  return 0;
+  return rio_true;
 }
 
-int
+rio_bool_t
 rio_write_http_header_2(rio_request_t * request, char* keyval) {
   rio_check_http_header_structure(request);
   rio_write_output_buffer(request, (unsigned char*) keyval);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
-  return 0;
+  return rio_true;
 }
 
 
-int
+rio_bool_t
 rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len) {
   rio_check_http_header_structure(request);
   rio_write_output_buffer_l(request, (unsigned char*) keyval, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
-  return 0;
+  return rio_true;
 }
 
-int
+rio_bool_t
 rio_write_http_content(rio_request_t * request, char* content) {
   size_t len;
   rio_check_http_header_structure(request);
@@ -212,19 +212,19 @@ rio_write_http_content(rio_request_t * request, char* content) {
   rio_check_http_if_content_length(request, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   rio_write_output_buffer_l(request, (unsigned char*) content, len);
-  return 0;
+  return rio_true;
 }
 
-int
+rio_bool_t
 rio_write_http_content_2(rio_request_t * request, char* content, size_t len) {
   rio_check_http_header_structure(request);
   rio_check_http_if_content_length(request, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   rio_write_output_buffer_l(request, (unsigned char*) content, len);
-  return 0;
+  return rio_true;
 }
 
-void
+rio_bool_t
 rio_http_getpath(rio_request_t *req, rio_buf_t *buf) {
   size_t buflen;
   rio_buf_t *pbuf = req->in_buff;
@@ -232,13 +232,14 @@ rio_http_getpath(rio_request_t *req, rio_buf_t *buf) {
     buflen = pbuf->end - pbuf->start;
     if ( (buf->start = (unsigned char*) memchr(pbuf->start, '/', buflen) ) && (buf->end = (unsigned char*) memchr(buf->start, ' ', pbuf->end - buf->start )) ) {
       buf->total_size = buf->end - buf->start;
-      return;
+      return rio_true;
     }
   }
   buf->total_size = 0;
+  return rio_false;
 }
 
-void
+rio_bool_t
 rio_http_getbody(rio_request_t *req, rio_buf_t *buf) {
   rio_buf_t *pbuf = req->in_buff;
   if (pbuf) {
@@ -246,13 +247,53 @@ rio_http_getbody(rio_request_t *req, rio_buf_t *buf) {
       buf->start += 4;
       buf->end = pbuf->end;
       buf->total_size = buf->end - buf->start;
-      return;
-    } else if( (buf->start = rio_memstr(pbuf->start, pbuf->end,(char*) "\n\n") ) ) {
+      return rio_true;
+    } else if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*) "\n\n") ) ) {
       buf->start += 2;
       buf->end = pbuf->end;
       buf->total_size = buf->end - buf->start;
-      return;
+      return rio_true;
     }
   }
   buf->total_size = 0;
+  return rio_false;
+}
+
+rio_bool_t
+rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
+  rio_http_getpath(req, buf);
+  size_t len = buf->total_size, keylen = strlen(key);
+  unsigned char *start = buf->start, *end = buf->end;
+  char deli = '?';
+
+  if (len && (start = (unsigned char*) memchr(start, (int)deli, len) ) ) {
+    deli = '&';
+    do {
+      if (end != start) {
+        start++;
+        len = end - start;
+        if (len >= keylen) {
+          if ( memcmp(start, key, keylen) == 0) {
+            start += keylen;
+            if ( (end = (unsigned char*) memchr(start, (int)deli, len) ) ) {
+              buf->start = start;
+              buf->end = --end;
+              buf->total_size = end - start;
+            } else {
+              buf->start = start;
+              buf->total_size = buf->end - start;
+            }
+            return rio_true;
+          }
+          continue;
+        }
+        buf->start = buf->end = 0;
+        buf->total_size = 0;
+        return rio_false;
+      }
+    } while ( (start = (unsigned char*) memchr(start, (int)deli, len) ) );
+  }
+  buf->start = buf->end = 0;
+  buf->total_size = 0;
+  return rio_false;
 }

@@ -78,6 +78,7 @@ typedef struct rio_request_s rio_request_t;
 typedef void (*rio_read_handler_pt)(rio_request_t *);
 typedef void (*rio_on_conn_close_pt)(rio_request_t *);
 typedef void (*rio_init_handler_pt)(void*);
+typedef enum { rio_false, rio_true } rio_bool_t;
 
 #define rio_buf_size(b) (size_t) (b->end - b->start)
 #define rio_add_http_fd rio_add_tcp_fd
@@ -156,21 +157,23 @@ extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_p
 
 extern unsigned char* rio_memstr(unsigned char * start, unsigned char *end, char *pattern);
 
-extern int rio_write_http_status(rio_request_t * request, int statuscode);
+extern rio_bool_t rio_write_http_status(rio_request_t * request, int statuscode);
 
-extern int rio_write_http_header(rio_request_t * request, char* key, char *val);
+extern rio_bool_t rio_write_http_header(rio_request_t * request, char* key, char *val);
 
-extern int rio_write_http_header_2(rio_request_t * request, char* keyval);
+extern rio_bool_t rio_write_http_header_2(rio_request_t * request, char* keyval);
 
-extern int rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len);
+extern rio_bool_t rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len);
 
-extern int rio_write_http_content(rio_request_t * request,  char* content);
+extern rio_bool_t rio_write_http_content(rio_request_t * request,  char* content);
 
-extern int rio_write_http_content_2(rio_request_t * request, char* content, size_t len);
+extern rio_bool_t rio_write_http_content_2(rio_request_t * request, char* content, size_t len);
 
-extern void rio_http_getpath(rio_request_t *req, rio_buf_t *buf);
+extern rio_bool_t rio_http_getpath(rio_request_t *req, rio_buf_t *buf);
 
-extern void rio_http_getbody(rio_request_t *req, rio_buf_t *buf);
+extern rio_bool_t rio_http_getbody(rio_request_t *req, rio_buf_t *buf);
+
+extern rio_bool_t rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf);
 
 #ifdef __cplusplus
 }

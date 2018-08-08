@@ -18,6 +18,7 @@ typedef struct rio_request_s rio_request_t;
 typedef void (*rio_read_handler_pt)(rio_request_t *);
 typedef void (*rio_on_conn_close_pt)(rio_request_t *);
 typedef void (*rio_init_handler_pt)(void*);
+typedef enum { rio_false, rio_true } rio_bool_t;
 
 #define rio_buf_size(b) (SIZE_T) (b->end - b->start)
 #define rio_add_http_fd rio_add_tcp_fd

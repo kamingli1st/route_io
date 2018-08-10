@@ -74,6 +74,13 @@ Alternatively,
 
 #### Download the Dev-C++ IDE - https://sourceforge.net/projects/orwelldevcpp/
 
+
+
+## for Mac osx build
+
+#### Add the sources file route_io.c route_io_http.c route_io.h into xcode or any ide
+
+
 #### You can use any IDE/build tools as you wish, just add route_io.c route_io_http.c route_io.h to your project
 
 

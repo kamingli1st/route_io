@@ -68,7 +68,7 @@ typedef struct {
   void* init_arg;
 } rio_instance_t;
 
-#else
+#elif !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)/*Linux*/
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -89,23 +89,6 @@ typedef struct rio_buf_s {
   unsigned char *end;
   size_t total_size;
 } rio_buf_t;
-
-// typedef struct {
-//   int sockfd;
-//   struct sockaddr_in client_addr;
-//   socklen_t client_addrlen;
-//   unsigned isudp: 1;
-//   // unsigned is_listener: 1;
-//   // union {
-//   //   int max_message_queue;
-//   //   lfqueue_t out_queue;
-//   //   rio_request_t *out_req;
-//   // };
-//   rio_request_t *req;
-//   rio_instance_t *instance;
-//   rio_read_handler_pt read_handler;
-//   rio_on_conn_close_pt on_conn_close_handler;
-// } rio_event_t;
 
 struct rio_request_s {
   int sockfd;
@@ -130,6 +113,52 @@ struct rio_instance_s {
   rio_init_handler_pt init_handler;
   void* init_arg;
 };
+    
+#elif __APPLE__
+    
+#include <stdlib.h>
+#include <stdint.h>
+#include <sys/event.h>
+#include <netinet/in.h>
+    
+    typedef struct rio_instance_s rio_instance_t;
+    typedef struct rio_request_s rio_request_t;
+    typedef void (*rio_read_handler_pt)(rio_request_t *);
+    typedef void (*rio_on_conn_close_pt)(rio_request_t *);
+    typedef void (*rio_init_handler_pt)(void*);
+    typedef enum { rio_false, rio_true } rio_bool_t;
+    
+#define rio_buf_size(b) (size_t) (b->end - b->start)
+#define rio_add_http_fd rio_add_tcp_fd
+    
+    typedef struct rio_buf_s {
+        unsigned char *start;
+        unsigned char *end;
+        size_t total_size;
+    } rio_buf_t;
+    
+    struct rio_request_s {
+        int sockfd;
+        struct sockaddr_in client_addr;
+        socklen_t client_addr_len;
+        unsigned isudp: 1;
+        rio_buf_t *in_buff;
+        rio_buf_t *out_buff;
+        void* ctx_val;
+        rio_instance_t *instance;
+        rio_read_handler_pt read_handler;
+        rio_on_conn_close_pt on_conn_close_handler;
+        struct epoll_event *epev;
+    };
+    
+    struct rio_instance_s {
+        int kqfd;
+        int nevents;
+        struct kevent *kevents;
+        rio_init_handler_pt init_handler;
+        void* init_arg;
+    };
+    
 
 #endif
 

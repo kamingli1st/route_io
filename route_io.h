@@ -156,6 +156,8 @@ struct rio_instance_s {
         int nevents;
         struct kevent *kevents;
         rio_init_handler_pt init_handler;
+        rio_request_t **__int_req;
+        pid_t parent_proc_id;
         void* init_arg;
     };
     

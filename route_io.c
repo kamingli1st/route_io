@@ -230,7 +230,11 @@ rio_udp_request_thread(void *arg) {
                     (LPDWORD) &out_sz, 0, (SOCKADDR *) &req->client_addr,
                     req->client_addr_len, &req->ovlp, NULL) != 0 ) {
         if ((rc = WSAGetLastError()) != WSA_IO_PENDING) {
+#ifdef _WIN64
           fprintf(stderr, "WSARecvFrom error:%d, sock:%lld, bytesRead:%lld\r\n", rc, req->listenfd, out_sz);
+#else
+		  fprintf(stderr, "WSARecvFrom error:%d, sock:%Id, bytesRead:%Id\r\n", rc, req->listenfd, out_sz);
+#endif
         }
       }
     }
@@ -303,7 +307,11 @@ RIO_UDP_MODE_DATA_READABLE:
                           (LPDWORD)&udpflag, (struct sockaddr*)&p_req->client_addr,
                           &p_req->client_addr_len, &p_req->ovlp, NULL) != 0) {
             if ((rc_status = WSAGetLastError()) != WSA_IO_PENDING) {
+#ifdef _WIN64
               fprintf(stderr, "WSARecvFrom error:%d, sock:%lld, bytesRead:%d\r\n", rc_status, p_req->listenfd, nbytes);
+#else
+			  fprintf(stderr, "WSARecvFrom error:%d, sock:%Id, bytesRead:%Id\r\n", rc_status, p_req->listenfd, nbytes);
+#endif
             }
           }
           p_req->next_state = rio_AFT_READ_AND_WRITABLE;

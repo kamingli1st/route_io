@@ -1,5 +1,5 @@
 #if defined _WIN32 || _WIN64 /*Windows*/
-
+#if defined(UNICODE) || defined(_UNICODE)
 #include "route_io.h"
 #include <process.h>
 #include <stdio.h>
@@ -646,7 +646,7 @@ rio_start(rio_instance_t *instance) {
 
   return 0;
 }
-
+#endif
 #elif !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)/*Linux*/
 
 #define _GNU_SOURCE 1

@@ -1,5 +1,4 @@
 #if defined _WIN32 || _WIN64 /*Windows*/
-#if defined(UNICODE) || defined(_UNICODE)
 #include "route_io.h"
 #include <process.h>
 #include <stdio.h>
@@ -454,83 +453,105 @@ console_ctrl_handler(DWORD ctrl) {
 }
 
 rio_instance_t*
-rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg ) {
-  rio_instance_t *instance;
-  TCHAR *cmd_str = GetCommandLine();
-  TCHAR *child_cmd_str = L"routeio-child-proc";
-  SIZE_T sizeof_cmdline = wcslen(cmd_str);
-  SIZE_T sizeof_childcmd = wcslen(child_cmd_str);
-  SIZE_T sizeof_child_cmdline;
-  // goto CONTINUE_CHILD_IOCP_PROCESS;
-  if (sizeof_cmdline > sizeof_childcmd) {
-    TCHAR *p_cmd_str = cmd_str +  sizeof_cmdline - sizeof("routeio-child-proc");
+rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg) {
+	rio_instance_t *instance;
 
-    if (wcsstr(p_cmd_str, L"routeio-child-proc")) {
-      goto CONTINUE_CHILD_IOCP_PROCESS;
-    } else {
-      goto SPAWN_CHILD_PROC;
-    }
-  } else {
+#if defined(UNICODE) || defined(_UNICODE)
+	typedef WCHAR RIOCMD_CHAR;
+#define rio_cmdlen wcslen
+#define rio_cmdstrstr wcsstr
+	static const RIOCMD_CHAR* child_cmd_str = L"routeio-child-proc";
+#else
+	typedef char RIOCMD_CHAR;
+#define rio_cmdlen strlen
+#define rio_cmdstrstr strstr
+	static const RIOCMD_CHAR* child_cmd_str = "routeio-child-proc";
+#endif
 
-SPAWN_CHILD_PROC:
-    // Setup a console control handler: We stop the server on CTRL-C
-    SetConsoleCtrlHandler( console_ctrl_handler, TRUE );
-    signal(SIGINT, rio_interrupt_handler);
-    sizeof_child_cmdline  = (sizeof_cmdline + sizeof_childcmd) * sizeof(TCHAR);
-    STARTUPINFO si;
-    ZeroMemory( &si, sizeof(si) );
-    si.cb = sizeof(si);
-    ZeroMemory( &g_pi, sizeof(g_pi) );
+	RIOCMD_CHAR *cmd_str = GetCommandLine();
+	SIZE_T cmd_len = rio_cmdlen(cmd_str);
+	SIZE_T childcmd_len = rio_cmdlen(child_cmd_str);
+	SIZE_T spawn_child_cmd_len = cmd_len + childcmd_len + 1; // 1 for NULL terminator
+															 // goto CONTINUE_CHILD_IOCP_PROCESS;
+	if (cmd_len > childcmd_len) {
+		RIOCMD_CHAR *p_cmd_str = cmd_str + cmd_len - sizeof("routeio-child-proc");
 
-    TCHAR *child_cmd_str = (TCHAR*) malloc(sizeof_child_cmdline);
-    ZeroMemory(child_cmd_str, sizeof_child_cmdline);
+		if (rio_cmdstrstr(p_cmd_str, child_cmd_str)) {
+			goto CONTINUE_CHILD_IOCP_PROCESS;
+		}
+		else {
+			goto SPAWN_CHILD_PROC;
+		}
+	}
+	else {
 
-    swprintf(child_cmd_str, sizeof_child_cmdline, L"%s routeio-child-proc", cmd_str);
+	SPAWN_CHILD_PROC:
+		// Setup a console control handler: We stop the server on CTRL-C
+		SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+		signal(SIGINT, rio_interrupt_handler);
+		STARTUPINFO si;
+		ZeroMemory(&si, sizeof(si));
+		si.cb = sizeof(si);
+		ZeroMemory(&g_pi, sizeof(g_pi));
 
-STREAM_RESTART:
-    if ( CreateProcess(
-           NULL,
-           child_cmd_str, // Child cmd string differentiate by last param
-           NULL,
-           NULL,
-           0,
-           CREATE_NO_WINDOW,
-           NULL,
-           NULL,
-           &si,
-           &g_pi)  == 0) {
-      RIO_ERROR("CreateProcess failed\n");
-      printf("%ls", child_cmd_str);
-      Sleep(2000);
-      ExitProcess(0);
-    }
-    fprintf(stderr, "%s\n", "Press Ctrl-C to terminate the process....");
-    WaitForSingleObject( g_pi.hProcess, INFINITE );
-    CloseHandle( g_pi.hProcess );
-    CloseHandle( g_pi.hThread );
+		RIOCMD_CHAR *spawn_child_cmd_str = (RIOCMD_CHAR*)malloc(spawn_child_cmd_len * sizeof(RIOCMD_CHAR));
+		ZeroMemory(spawn_child_cmd_str, spawn_child_cmd_len * sizeof(RIOCMD_CHAR));
 
-    goto STREAM_RESTART;
-  }
+		int i, j;
+		for (i = 0; i < cmd_len; i++) {
+			spawn_child_cmd_str[i] = cmd_str[i];
+		}
+		spawn_child_cmd_str[i++] = ' ';
 
-  ExitProcess(0);
+		for (j = 0; j < childcmd_len; i++, j++) {
+			spawn_child_cmd_str[i] = child_cmd_str[j];
+		}
+
+		spawn_child_cmd_str[i] = '\0';
+
+	STREAM_RESTART:
+		if (CreateProcess(
+			NULL,
+			spawn_child_cmd_str, // Child cmd string differentiate by last param
+			NULL,
+			NULL,
+			0,
+			CREATE_NO_WINDOW,
+			NULL,
+			NULL,
+			&si,
+			&g_pi) == 0) {
+			RIO_ERROR("CreateProcess failed\n");
+			Sleep(2000);
+			ExitProcess(0);
+		}
+		fprintf(stderr, "%s\n", "Press Ctrl-C to terminate the process....");
+		WaitForSingleObject(g_pi.hProcess, INFINITE);
+		CloseHandle(g_pi.hProcess);
+		CloseHandle(g_pi.hThread);
+
+		goto STREAM_RESTART;
+	}
+
+	ExitProcess(0);
 
 CONTINUE_CHILD_IOCP_PROCESS:
-  instance = (rio_instance_t*) RIO_MALLOC(sizeof(rio_instance_t));
-  instance->init_handler = init_handler;
-  instance->init_arg = arg;
-  // Initialize the Microsoft Windows Sockets Library
-  WSADATA Wsa = {0};
-  WSAStartup( MAKEWORD(2, 2), &Wsa );
-  // Create a new I/O Completion port, only 1 worker is allowed
-  instance->iocp = CreateIoCompletionPort( INVALID_HANDLE_VALUE, 0, 0, 0 );
+	instance = (rio_instance_t*)RIO_MALLOC(sizeof(rio_instance_t));
+	instance->init_handler = init_handler;
+	instance->init_arg = arg;
+	// Initialize the Microsoft Windows Sockets Library
+	WSADATA Wsa = { 0 };
+	WSAStartup(MAKEWORD(2, 2), &Wsa);
+	// Create a new I/O Completion port, only 1 worker is allowed
+	instance->iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
 
-  if (instance->iocp == NULL) {
-    fprintf(stderr, "Error while creating routing instance %d\n", GetLastError());
-    RIO_FREE(instance);
-    ExitProcess(0);
-  }
+	if (instance->iocp == NULL) {
+		fprintf(stderr, "Error while creating routing instance %d\n", GetLastError());
+		RIO_FREE(instance);
+		ExitProcess(0);
+	}
 
-  return instance;
+	return instance;
 }
 
 int
@@ -646,7 +667,6 @@ rio_start(rio_instance_t *instance) {
 
   return 0;
 }
-#endif
 #elif !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)/*Linux*/
 
 #define _GNU_SOURCE 1

@@ -63,6 +63,16 @@ int main(void) {
 
 ```
 
+## Extra Paramater *size_per_read* on windows os
+```c
+extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
+                          SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
+extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
+                          SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
+```
+
+### every event connection has *size_per_read* specify, if you set 64 backlog, which mean 64 events has different *size_per_read*, size_per_read is expandable if the data has more. 
+
 
 ## for Windows os build
 

@@ -254,7 +254,11 @@ rio_tcp_request_thread(void *arg) {
   req->read_handler(req);
   if ( req->out_buff ) {
     rio_writing_buf(req, req->out_buff);
+  } else {
+    req->next_state = rio_AFT_READ_AND_WRITABLE;
+    ReadFile((HANDLE)req->sock, req->in_buff->start, (DWORD)req->in_buff->total_size, 0, (OVERLAPPED*)req);
   }
+
   // req->in_buff->end = req->in_buff->start;
   return 0;
 }
@@ -472,7 +476,7 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg) {
 	SIZE_T cmd_len = rio_cmdlen(cmd_str);
 	SIZE_T childcmd_len = rio_cmdlen(child_cmd_str);
 	SIZE_T spawn_child_cmd_len = cmd_len + childcmd_len + 1; // 1 for NULL terminator
-															 // goto CONTINUE_CHILD_IOCP_PROCESS;
+//	goto CONTINUE_CHILD_IOCP_PROCESS;
 	if (cmd_len > childcmd_len) {
 		RIOCMD_CHAR *p_cmd_str = cmd_str + cmd_len - sizeof("routeio-child-proc");
 

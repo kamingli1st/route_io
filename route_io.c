@@ -1,5 +1,6 @@
-static int RIO_MAX_POLLING_EVENT = 128;
-static int RIO_SZ_PER_READ = 1024;
+static int __RIO_MAX_POLLING_EVENT__ = 128;
+static int __RIO_SZ_PER_READ__ = 1024;
+static int __RIO_NO_FORK_PROCESS__ = 0; // By default it fork a process
 
 #if defined _WIN32 || _WIN64 /*Windows*/
 #include "route_io.h"
@@ -307,7 +308,7 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 			else {
 				if (p_req->isudp && udpbuf.len == nbytes) {
 					// In case more data to read, readjust the size per read
-					RIO_SZ_PER_READ *= 2;
+					__RIO_SZ_PER_READ__ *= 2;
 					goto RIO_UDP_MODE_SWITCH_STATE;
 				}
 			}
@@ -318,8 +319,8 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 			if (p_req->isudp) {
 				switch (p_req->next_state) {
 				case rio_READABLE:
-					riobuf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + RIO_SZ_PER_READ);
-					udpbuf.len =(ULONG) riobuf->total_size = RIO_SZ_PER_READ;
+					riobuf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + __RIO_SZ_PER_READ__);
+					udpbuf.len =(ULONG) riobuf->total_size = __RIO_SZ_PER_READ__;
 					udpbuf.buf = riobuf->start = riobuf->end = ((u_char*)riobuf) + sizeof(rio_buf_t);
 					p_req->in_buff = riobuf;
 					udpflag = 0;
@@ -372,13 +373,18 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 }
 
 void
+rio_set_no_fork() {
+	__RIO_NO_FORK_PROCESS__ = 1;
+}
+
+void
 rio_set_max_polling_event(int opt) {
-	RIO_MAX_POLLING_EVENT = opt;
+	__RIO_MAX_POLLING_EVENT__ = opt;
 }
 
 void
 rio_set_sz_per_read(int opt) {
-	RIO_SZ_PER_READ = opt;
+	__RIO_SZ_PER_READ__ = opt;
 }
 
 void
@@ -490,8 +496,8 @@ rio_instance_t*
 rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg) {
 	rio_instance_t *instance;
 
-	IocpBuf.len = RIO_SZ_PER_READ;
-	IocpBuf.buf = RIO_MALLOC(RIO_SZ_PER_READ * sizeof(unsigned char));
+	IocpBuf.len = __RIO_SZ_PER_READ__;
+	IocpBuf.buf = RIO_MALLOC(__RIO_SZ_PER_READ__ * sizeof(unsigned char));
 
 #if defined(UNICODE) || defined(_UNICODE)
 	typedef WCHAR RIOCMD_CHAR;
@@ -509,7 +515,8 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg) {
 	SIZE_T cmd_len = rio_cmdlen(cmd_str);
 	SIZE_T childcmd_len = rio_cmdlen(child_cmd_str);
 	SIZE_T spawn_child_cmd_len = cmd_len + childcmd_len + 1; // 1 for NULL terminator
-	goto CONTINUE_CHILD_IOCP_PROCESS;
+	if(__RIO_NO_FORK_PROCESS__)
+		goto CONTINUE_CHILD_IOCP_PROCESS;
 	if (cmd_len > childcmd_len) {
 		RIOCMD_CHAR *p_cmd_str = cmd_str + cmd_len - sizeof("routeio-child-proc");
 
@@ -622,7 +629,7 @@ rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 	}
 
 	/**Multhread accept event per socket**/
-	for (i = 0; i < RIO_MAX_POLLING_EVENT; i++) {
+	for (i = 0; i < __RIO_MAX_POLLING_EVENT__; i++) {
 		if ((preq = rio_create_udp_request_event(listenfd, instance->iocp)) == NULL) {
 			fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
 			return -1;
@@ -674,7 +681,7 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 	}
 
 	/**Multhread accept event per socket**/
-	for (i = 0; i < RIO_MAX_POLLING_EVENT; i++) {
+	for (i = 0; i < __RIO_MAX_POLLING_EVENT__; i++) {
 		if ((preq = rio_create_request_event(listenfd, instance->iocp)) == NULL) {
 			fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
 			return -1;

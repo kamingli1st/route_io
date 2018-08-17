@@ -172,6 +172,7 @@ extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_p
                           rio_on_conn_close_pt on_conn_close_handler);
 extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
                           rio_on_conn_close_pt on_conn_close_handler);
+extern void rio_set_no_fork(void);
 extern void rio_set_max_polling_event(int opt);
 extern void rio_set_sz_per_read(int opt);
 

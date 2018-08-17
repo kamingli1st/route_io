@@ -796,6 +796,21 @@ rio_do_close(int fd) {
 }
 
 void
+rio_set_no_fork() {
+  __RIO_NO_FORK_PROCESS__ = 1;
+}
+
+void
+rio_set_max_polling_event(int opt) {
+  __RIO_MAX_POLLING_EVENT__ = opt;
+}
+
+void
+rio_set_sz_per_read(int opt) {
+  __RIO_SZ_PER_READ__ = opt;
+}
+
+void
 rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
   rio_buf_t *buf;
   size_t outsz = RIO_STRLEN(output), curr_size, new_size;
@@ -1123,7 +1138,11 @@ STREAM_RESTART:
   if (!has_init_signal) {
     rio_add_signal_handler(rio_signal_backtrace);
   }
-  ch_pid = fork();
+  if(__RIO_NO_FORK_PROCESS__) {
+    ch_pid = 0;
+  } else {
+    ch_pid = fork();
+  }
   if (ch_pid == -1) {
     perror("fork");
     exit(EXIT_FAILURE);
@@ -1450,6 +1469,21 @@ rio_do_close(int fd) {
   } while (r == -1 && errno == EINTR);
 
   return r;
+}
+
+void
+rio_set_no_fork() {
+  __RIO_NO_FORK_PROCESS__ = 1;
+}
+
+void
+rio_set_max_polling_event(int opt) {
+  __RIO_MAX_POLLING_EVENT__ = opt;
+}
+
+void
+rio_set_sz_per_read(int opt) {
+  __RIO_SZ_PER_READ__ = opt;
 }
 
 void

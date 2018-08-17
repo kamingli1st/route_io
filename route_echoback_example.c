@@ -20,7 +20,7 @@ void read_handler(rio_request_t *req) {
 
 	rio_write_output_buffer_l(req, req->in_buff->start, nbytes);
 
-	rio_write_output_buffer(req, "\n");
+	rio_write_output_buffer(req, (unsigned char*) "\n");
 
 }
 

@@ -4,7 +4,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 #if defined _WIN32 || _WIN64
 
 #include <winsock2.h>
@@ -60,6 +59,7 @@ struct rio_request_s {
   rio_on_conn_close_pt on_conn_close_handler;
   unsigned isudp: 1;
   void* ctx_val;
+  //DWORD readable_bytes;
 };
 
 typedef struct {
@@ -168,18 +168,12 @@ extern void rio_write_output_buffer(rio_request_t *req, unsigned char* output);
 extern void rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len);
 extern rio_instance_t* rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg );
 extern int rio_start(rio_instance_t *instance);
-#if defined _WIN32 || _WIN64
-extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
-                          SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
-extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
-                          SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
-#else
 extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler,
                           rio_on_conn_close_pt on_conn_close_handler);
 extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
                           rio_on_conn_close_pt on_conn_close_handler);
-
-#endif
+extern void rio_set_max_polling_event(int opt);
+extern void rio_set_sz_per_read(int opt);
 
 /** For HTTP OUTPUT **/
 #define rio_http_xform_header "Content-Type: application/x-www-form-urlencoded"

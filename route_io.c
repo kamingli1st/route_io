@@ -1,3 +1,6 @@
+static int RIO_MAX_POLLING_EVENT = 128;
+static int RIO_SZ_PER_READ = 1024;
+
 #if defined _WIN32 || _WIN64 /*Windows*/
 #include "route_io.h"
 #include <process.h>
@@ -10,7 +13,6 @@
 #pragma warning(disable:4996)
 
 #define ACCEPT_ADDRESS_LENGTH      ((sizeof( struct sockaddr_in) + 16))
-#define DEFAULT_READ_BUFFER_SIZE   1024
 #define COMPLETION_KEY_NONE        0
 #define COMPLETION_KEY_SHUTDOWN    1
 #define COMPLETION_KEY_IO          2
@@ -19,446 +21,477 @@
 #define RIO_STRLEN(p) strlen((char*)p)
 #define RIO_ERROR(errmsg) fprintf(stderr, "%s - %d\n", errmsg, GetLastError() )
 #define RIO_FREE(p) free(p);p=NULL
-#define RIO_FREE_OUT_BUFF \
+#define RIO_FREE_REQ_IN_OUT(req) \
 if(req){\
-if(req->out_buff)RIO_FREE(req->out_buff);}
+if(req->in_buff){RIO_FREE(req->in_buff);req->in_buff=NULL;} \
+if(req->out_buff){RIO_FREE(req->out_buff);req->out_buff=NULL;}}
 
 PROCESS_INFORMATION g_pi;
 BOOL is_child = FALSE;
 static inline int rio_is_peer_closed(size_t n_byte_read) {
-  return n_byte_read == 0;
+	return n_byte_read == 0;
 }
 static int rio_setlinger(int sockfd, int onoff, int timeout_sec);
 static void rio_on_accept(rio_request_t *req);
 static void rio_on_recv(rio_request_t *req);
 static void rio_writing_buf(rio_request_t *req, rio_buf_t *out_buf);
 static void rio_peer_close(rio_request_t *req);
-static void rio_process_and_write(rio_request_t *req,  size_t n_byte_read);
+static void rio_process_and_write(rio_request_t *req, size_t n_byte_read);
 static void rio_clear_buffers(rio_request_t *req);
 static void rio_conn_closing(rio_request_t *req);
 static void rio_after_close(rio_request_t *req);
 static void rio_on_iocp(rio_request_t *req, DWORD nbytes);
-static rio_request_t* rio_create_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read);
-static rio_request_t* rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read);
+static rio_request_t* rio_create_request_event(SOCKET listenfd, HANDLE iocp_port);
+static rio_request_t* rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port);
 static int rio_run_iocp_worker(rio_instance_t *instance);
+static inline int rio_min(DWORD a, DWORD b) { return (a < b) ? a : b; }
 static void rio_def_on_conn_close_handler(rio_request_t *req) {
-  /*Do nothing*/
+	/*Do nothing*/
 }
 
 static HANDLE master_shutdown_ev = 0;
 unsigned __stdcall rio_udp_request_thread(void *);
 unsigned __stdcall rio_tcp_request_thread(void *);
 
+static WSABUF IocpBuf;
+DWORD ReadableBytes, IocpLPFlag;
+
 static void
 rio_on_accept(rio_request_t *req) {
-  req->next_state = rio_READABLE;
-  DWORD ReceiveLen; // Do nothing for this value
-  AcceptEx( req->listenfd, req->sock, req->addr_block, 0, ACCEPT_ADDRESS_LENGTH,
-            ACCEPT_ADDRESS_LENGTH, &ReceiveLen, (OVERLAPPED*) req );
+	req->next_state = rio_READABLE;
+	DWORD ReceiveLen; // Do nothing for this value
+	AcceptEx(req->listenfd, req->sock, req->addr_block, 0, ACCEPT_ADDRESS_LENGTH,
+		ACCEPT_ADDRESS_LENGTH, &ReceiveLen, (LPOVERLAPPED)req);
 }
 
 static void
 rio_on_recv(rio_request_t *req) {
-  setsockopt( req->sock, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
-              (char*)&req->listenfd, sizeof(SOCKET) );
+	setsockopt(req->sock, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
+		(char*)&req->listenfd, sizeof(SOCKET));
 
-  req->next_state = rio_AFT_READ_AND_WRITABLE;
-  ReadFile( (HANDLE)req->sock, req->in_buff->start, (DWORD) req->in_buff->total_size, 0, (OVERLAPPED*)req );
+	req->next_state = rio_AFT_READ_AND_WRITABLE;
+	IocpLPFlag = MSG_PEEK;
+	WSARecv(req->sock, &IocpBuf, 1, &ReadableBytes, &IocpLPFlag, (LPOVERLAPPED)req, NULL);
+	//ReadFile( (HANDLE)req->sock, req->in_buff->start, (DWORD) req->in_buff->total_size, 0, (OVERLAPPED*)req );
 }
 
 static void
 rio_writing_buf(rio_request_t *req, rio_buf_t *out_buf) {
-  req->trans_buf.Head = (LPVOID)(out_buf->start);
-  req->trans_buf.HeadLength = (DWORD) rio_buf_size (req->out_buff);
-  req->next_state = rio_DONE_WRITE;
-  TransmitFile( req->sock, 0,  0, 0, (LPOVERLAPPED)req, &req->trans_buf, 0 );
+	req->trans_buf.Head = (LPVOID)(out_buf->start);
+	req->trans_buf.HeadLength = (DWORD)rio_buf_size(req->out_buff);
+	req->next_state = rio_DONE_WRITE;
+	TransmitFile(req->sock, 0, 0, 0, (LPOVERLAPPED)req, &req->trans_buf, 0);
 }
 
 static void
 rio_peer_close(rio_request_t *req) {
-  req->on_conn_close_handler(req);
-  req->ctx_val = NULL;
-  rio_conn_closing(req);
-  if (req->out_buff) {
-    RIO_FREE(req->out_buff);
-    req->out_buff = NULL;
-  }
-  //  shutdown( req->sock, SD_BOTH );
-  //  closesocket(req->sock );
+	req->on_conn_close_handler(req);
+	req->ctx_val = NULL;
+	rio_conn_closing(req);
+	RIO_FREE_REQ_IN_OUT(req);
+	//  shutdown( req->sock, SD_BOTH );
+	//  closesocket(req->sock );
 }
 
 static void
-rio_process_and_write(rio_request_t *req,  size_t n_byte_read) {
-  if ( rio_is_peer_closed( n_byte_read ) ) {
-    rio_peer_close(req);
-  } else {
-    req->in_buff->end = req->in_buff->start + n_byte_read;
-    unsigned tid;
-    HANDLE thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_tcp_request_thread, req, 0, &tid);
-    if (thread_hdl == 0) {
-      fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
-    }
-    /*Detach thread*/
-    CloseHandle(thread_hdl);
-  }
+rio_process_and_write(rio_request_t *req, size_t n_byte_read) {
+	if (rio_is_peer_closed(n_byte_read)) {
+		rio_peer_close(req);
+	}
+	else {
+		req->in_buff->end = req->in_buff->start + n_byte_read;
+		unsigned tid;
+		HANDLE thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_tcp_request_thread, req, 0, &tid);
+		if (thread_hdl == 0) {
+			fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
+		}
+		/*Detach thread*/
+		CloseHandle(thread_hdl);
+	}
 }
 
 static void
 rio_clear_buffers(rio_request_t *req) {
-  ZeroMemory( req->addr_block, ACCEPT_ADDRESS_LENGTH * 2 );
-  req->in_buff->end = req->in_buff->start;
-  ZeroMemory( &req->trans_buf, sizeof(TRANSMIT_FILE_BUFFERS) );
-  RIO_FREE_OUT_BUFF;
+	ZeroMemory(req->addr_block, ACCEPT_ADDRESS_LENGTH * 2);
+	ZeroMemory(&req->trans_buf, sizeof(TRANSMIT_FILE_BUFFERS));
+	RIO_FREE_REQ_IN_OUT(req);
 }
 
 static void
 rio_conn_closing(rio_request_t *req) {
-  req->next_state = rio_PEER_CLOSED;
-  TransmitFile( req->sock, 0, 0, 0, (LPOVERLAPPED)req, 0,  TF_DISCONNECT | TF_REUSE_SOCKET );
+	req->next_state = rio_PEER_CLOSED;
+	TransmitFile(req->sock, 0, 0, 0, (LPOVERLAPPED)req, 0, TF_DISCONNECT | TF_REUSE_SOCKET);
 }
 
 static void
 rio_after_close(rio_request_t *req) {
-  rio_clear_buffers(req);
-  rio_on_accept(req);
+	rio_clear_buffers(req);
+	rio_on_accept(req);
 }
 
 static void
 rio_on_iocp(rio_request_t *req, DWORD nbytes) {
-  switch ( req->next_state )
-  {
-  case rio_READABLE:
-    rio_on_recv(req);
-    break;
-  case rio_AFT_READ_AND_WRITABLE:
-    rio_process_and_write( req, nbytes );
-    break;
-  case rio_DONE_WRITE:
-    if (req->out_buff) {
-      RIO_FREE(req->out_buff);
-      req->out_buff = NULL;
-    }
-    req->next_state = rio_AFT_READ_AND_WRITABLE;
-    ReadFile( (HANDLE)req->sock, req->in_buff->start, (DWORD) req->in_buff->total_size, 0, (OVERLAPPED*)req );
-    break;
-  case rio_PEER_CLOSED:
-    rio_after_close(req);
-    break;
-  }
+	switch (req->next_state)
+	{
+	case rio_READABLE:
+		rio_on_recv(req);
+		break;
+	case rio_AFT_READ_AND_WRITABLE:
+		if (IocpBuf.len == nbytes) { // HAS MORE DATA TO READ??
+			IocpBuf.len *= 2;
+			free(IocpBuf.buf);
+			IocpBuf.buf = RIO_MALLOC(IocpBuf.len * sizeof(unsigned char));
+			IocpLPFlag = MSG_PEEK;
+			WSARecv(req->sock, &IocpBuf, 1, &ReadableBytes, &IocpLPFlag, (LPOVERLAPPED)req, NULL);
+		}
+		else if (req->in_buff == NULL) {
+			rio_buf_t *riobuf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + nbytes);
+			riobuf->total_size = nbytes;
+			riobuf->start = ((u_char*)riobuf) + sizeof(rio_buf_t);
+			riobuf->end = riobuf->start + nbytes;
+			req->in_buff = riobuf;
+			ReadFile((HANDLE)req->sock, req->in_buff->start, (DWORD)req->in_buff->total_size, 0, (OVERLAPPED*)req);
+
+		}
+		else {
+			rio_process_and_write(req, nbytes);
+		}
+		break;
+	case rio_DONE_WRITE:
+		RIO_FREE_REQ_IN_OUT(req);
+		//ReadFile( (HANDLE)req->sock, req->in_buff->start, (DWORD) req->in_buff->total_size, 0, (OVERLAPPED*)req );
+		IocpLPFlag = MSG_PEEK;
+		WSARecv(req->sock, &IocpBuf, 1, &ReadableBytes, &IocpLPFlag, (LPOVERLAPPED)req, NULL);
+		req->next_state = rio_AFT_READ_AND_WRITABLE;
+		break;
+	case rio_PEER_CLOSED:
+		rio_after_close(req);
+		break;
+	}
 }
 
 static rio_request_t*
-rio_create_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read) {
-  rio_request_t *req = (rio_request_t*) RIO_MALLOC(sizeof(rio_request_t));
-  req->ovlp.Internal = 0;
-  req->ovlp.InternalHigh = 0;
-  req->ovlp.Offset = 0;
-  req->ovlp.OffsetHigh = 0;
-  req->ovlp.hEvent = 0;
-  req->next_state = rio_IDLE;
-  req->listenfd = listenfd;
-  // int optval = 1;
+rio_create_request_event(SOCKET listenfd, HANDLE iocp_port) {
+	rio_request_t *req = (rio_request_t*)RIO_MALLOC(sizeof(rio_request_t));
+	req->ovlp.Internal = 0;
+	req->ovlp.InternalHigh = 0;
+	req->ovlp.Offset = 0;
+	req->ovlp.OffsetHigh = 0;
+	req->ovlp.hEvent = 0;
+	req->next_state = rio_IDLE;
+	req->listenfd = listenfd;
+	// int optval = 1;
 
-  sz_per_read = sz_per_read ? sz_per_read : DEFAULT_READ_BUFFER_SIZE;
-  rio_buf_t *buf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + sz_per_read );
-  buf->total_size = sz_per_read;
-  buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);
+	/*sz_per_read = sz_per_read ? sz_per_read : DEFAULT_READ_BUFFER_SIZE;
+	rio_buf_t *buf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + sz_per_read );
+	buf->total_size = sz_per_read;
+	buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);*/
 
-  req->in_buff = buf;
+	req->in_buff = NULL;
 
-  ZeroMemory( req->addr_block, ACCEPT_ADDRESS_LENGTH * 2 );
-  // ZeroMemory( read_buf, req->sz_per_read );
-  // myRequest.reserve( DEFAULT_READ_BUFFER_SIZE );
-  ZeroMemory( &req->trans_buf, sizeof(TRANSMIT_FILE_BUFFERS) );
+	ZeroMemory(req->addr_block, ACCEPT_ADDRESS_LENGTH * 2);
+	// ZeroMemory( read_buf, req->sz_per_read );
+	// myRequest.reserve( DEFAULT_READ_BUFFER_SIZE );
+	ZeroMemory(&req->trans_buf, sizeof(TRANSMIT_FILE_BUFFERS));
 
-  req->sock = WSASocket( PF_INET, SOCK_STREAM, IPPROTO_TCP, 0, 0,  WSA_FLAG_OVERLAPPED );
+	req->sock = WSASocket(PF_INET, SOCK_STREAM, IPPROTO_TCP, 0, 0, WSA_FLAG_OVERLAPPED);
 
-  // Associate the client socket with the I/O Completion Port.
-  if (CreateIoCompletionPort( (HANDLE)req->sock, iocp_port, COMPLETION_KEY_IO, 0 ) == NULL)  {
-    fprintf(stderr, "Error while creating event %d\n", GetLastError());
-    RIO_FREE(req);
-    return NULL;
-  }
-  rio_on_accept(req);
-  return req;
+	// Associate the client socket with the I/O Completion Port.
+	if (CreateIoCompletionPort((HANDLE)req->sock, iocp_port, COMPLETION_KEY_IO, 0) == NULL) {
+		fprintf(stderr, "Error while creating event %d\n", GetLastError());
+		RIO_FREE(req);
+		return NULL;
+	}
+	rio_on_accept(req);
+	return req;
 }
 
 static rio_request_t*
-rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port, SIZE_T sz_per_read) {
-  int rc;
-  rio_request_t *req = (rio_request_t*) RIO_MALLOC(sizeof(rio_request_t));
-  req->listenfd = listenfd;
-  req->ovlp.Internal = 0;
-  req->ovlp.InternalHigh = 0;
-  req->ovlp.Offset = 0;
-  req->ovlp.OffsetHigh = 0;
-  req->ovlp.hEvent = 0;
-  req->isudp = 1;
-  req->ctx_val = NULL;
-  req->out_buff = NULL;
+rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port) {
+	int rc;
+	rio_request_t *req = (rio_request_t*)RIO_MALLOC(sizeof(rio_request_t));
+	req->listenfd = listenfd;
+	req->ovlp.Internal = 0;
+	req->ovlp.InternalHigh = 0;
+	req->ovlp.Offset = 0;
+	req->ovlp.OffsetHigh = 0;
+	req->ovlp.hEvent = 0;
+	req->isudp = 1;
+	req->ctx_val = NULL;
+	req->out_buff = NULL;
 
-  sz_per_read = sz_per_read ? sz_per_read : DEFAULT_READ_BUFFER_SIZE;
+	/*sz_per_read = sz_per_read ? sz_per_read : DEFAULT_READ_BUFFER_SIZE;
 
-  rio_buf_t *in_buff = (rio_buf_t*)RIO_MALLOC( sizeof(rio_buf_t) + (sz_per_read * sizeof(unsigned char)) );
-  in_buff->end = in_buff->start = ((u_char*) in_buff) + sizeof(rio_buf_t);
-  in_buff->total_size = sz_per_read;
-  req->in_buff = in_buff;
-  req->client_addr_len = sizeof(req->client_addr);
-  //  ZeroMemory( &req->client_addr, req->client_addr_len );
-  req->next_state = rio_READABLE;
-  if (!PostQueuedCompletionStatus(iocp_port, 0, (ULONG_PTR)COMPLETION_KEY_IO, &req->ovlp)) {
-    if ((rc = WSAGetLastError()) != WSA_IO_PENDING)
-      fprintf(stderr, "PostQueuedCompletionStatus error: %d\r\n", rc);
-  }
-  return req;
+	rio_buf_t *in_buff = (rio_buf_t*)RIO_MALLOC( sizeof(rio_buf_t) + (sz_per_read * sizeof(unsigned char)) );
+	in_buff->end = in_buff->start = ((u_char*) in_buff) + sizeof(rio_buf_t);
+	in_buff->total_size = sz_per_read;*/
+	req->in_buff = NULL;
+	req->client_addr_len = sizeof(req->client_addr);
+	//  ZeroMemory( &req->client_addr, req->client_addr_len );
+	req->next_state = rio_READABLE;
+	if (!PostQueuedCompletionStatus(iocp_port, 0, (ULONG_PTR)COMPLETION_KEY_IO, &req->ovlp)) {
+		if ((rc = WSAGetLastError()) != WSA_IO_PENDING)
+			fprintf(stderr, "PostQueuedCompletionStatus error: %d\r\n", rc);
+	}
+	return req;
 }
 
 unsigned __stdcall
 rio_udp_request_thread(void *arg) {
-  int rc;
-  SIZE_T out_sz;
-  WSABUF udpbuf;
-  rio_request_t *req = (rio_request_t*)arg;
-  req->read_handler(req);
-  if (req->out_buff) {
-    if ( (out_sz = rio_buf_size(req->out_buff)) ) {
-      udpbuf.buf = (char*) req->out_buff->start;
-      udpbuf.len = (ULONG) out_sz;
-      req->next_state = rio_DONE_WRITE;
-      if (WSASendTo(req->listenfd, &udpbuf, 1,
-                    (LPDWORD) &out_sz, 0, (SOCKADDR *) &req->client_addr,
-                    req->client_addr_len, &req->ovlp, NULL) != 0 ) {
-        if ((rc = WSAGetLastError()) != WSA_IO_PENDING) {
+	int rc;
+	SIZE_T out_sz;
+	WSABUF udpbuf;
+	rio_request_t *req = (rio_request_t*)arg;
+	req->read_handler(req);
+	if (req->out_buff) {
+		if ((out_sz = rio_buf_size(req->out_buff))) {
+			udpbuf.buf = (char*)req->out_buff->start;
+			udpbuf.len = (ULONG)out_sz;
+			req->next_state = rio_DONE_WRITE;
+			if (WSASendTo(req->listenfd, &udpbuf, 1,
+				(LPDWORD)&out_sz, 0, (SOCKADDR *)&req->client_addr,
+				req->client_addr_len, &req->ovlp, NULL) != 0) {
+				if ((rc = WSAGetLastError()) != WSA_IO_PENDING) {
 #ifdef _WIN64
-          fprintf(stderr, "WSARecvFrom error:%d, sock:%lld, bytesRead:%lld\r\n", rc, req->listenfd, out_sz);
+					fprintf(stderr, "WSASendTo error:%d, sock:%lld, bytesRead:%lld\r\n", rc, req->listenfd, out_sz);
 #else
-		  fprintf(stderr, "WSARecvFrom error:%d, sock:%Id, bytesRead:%Id\r\n", rc, req->listenfd, out_sz);
+					fprintf(stderr, "WSASendTo error:%d, sock:%Id, bytesRead:%Id\r\n", rc, req->listenfd, out_sz);
 #endif
-        }
-      }
-    }
-  } else {
-    req->next_state = rio_READABLE;
-    if (!PostQueuedCompletionStatus(req->iocp, 0, (ULONG_PTR)COMPLETION_KEY_IO, &req->ovlp)) {
-      if ((rc = WSAGetLastError()) != WSA_IO_PENDING) {
-        fprintf(stderr, "PostQueuedCompletionStatus error: %d\r\n", rc);
-      }
-    }
-  }
-  return 0;
+				}
+			}
+		}
+	}
+	return 0;
 }
 
 unsigned __stdcall
 rio_tcp_request_thread(void *arg) {
-  rio_request_t *req = (rio_request_t*)arg;
-  req->read_handler(req);
-  if ( req->out_buff ) {
-    rio_writing_buf(req, req->out_buff);
-  } else {
-    req->next_state = rio_AFT_READ_AND_WRITABLE;
-    ReadFile((HANDLE)req->sock, req->in_buff->start, (DWORD)req->in_buff->total_size, 0, (OVERLAPPED*)req);
-  }
+	rio_request_t *req = (rio_request_t*)arg;
+	req->read_handler(req);
+	if (req->out_buff) {
+		rio_writing_buf(req, req->out_buff);
+	}
+	else {
+		req->next_state = rio_AFT_READ_AND_WRITABLE;
+		// ReadFile((HANDLE)req->sock, req->in_buff->start, (DWORD)req->in_buff->total_size, 0, (OVERLAPPED*)req);
+		IocpLPFlag = MSG_PEEK;
+		WSARecv(req->sock, &IocpBuf, 1, &ReadableBytes, &IocpLPFlag, (LPOVERLAPPED)req, NULL);
+	}
 
-  // req->in_buff->end = req->in_buff->start;
-  return 0;
+	// req->in_buff->end = req->in_buff->start;
+	return 0;
 }
 
 static int
 rio_run_iocp_worker(rio_instance_t *instance) {
-  BOOL rc_status;
-  DWORD nbytes, dwIoControlCode = SIO_RCVALL;
-  unsigned int optval = 1;
-  ULONG_PTR CompKey;
-  rio_request_t *p_req;
-  int err_retry = 30;
-  WSABUF udpbuf;
-  DWORD udpflag = 0;
+	BOOL rc_status;
+	DWORD rc, nbytes, dwIoControlCode = SIO_RCVALL, udpflag;
+	WSABUF udpbuf;
+	ULONG_PTR CompKey;
+	rio_request_t *p_req;
+	//int err_retry = 30;
+	rio_buf_t * riobuf;
 
-  for (;;) {
-    rc_status = GetQueuedCompletionStatus( (HANDLE)instance->iocp, &nbytes, &CompKey, (LPOVERLAPPED *) &p_req, INFINITE );
+	for (;;) {
+		rc_status = GetQueuedCompletionStatus((HANDLE)instance->iocp, &nbytes, &CompKey, (LPOVERLAPPED *)&p_req, INFINITE);
 
-    if ( 0 == rc_status ) {
-      // An error occurred; reset to a known state.
-      if ( ERROR_MORE_DATA != (rc_status = WSAGetLastError()) ) {
-        perror("Erro GET QUEUE");
-        fprintf(stderr, "WSAIotcl(%ul) failed with error code %d\n", dwIoControlCode, WSAGetLastError());
-        if ( p_req ) {
-          rio_peer_close(p_req);
-        }
-      } else {
-        //        ioctlsocket(p_req->listenfd, FIONREAD, &nbytes);
-        DWORD new_nbytes = nbytes * 2;
+		if (0 == rc_status) {
+			// An error occurred; reset to a known state.
+			if (ERROR_MORE_DATA != (rc_status = WSAGetLastError())) {
+				perror("Error while GETTING QUEUE");
+				fprintf(stderr, "WSAIotcl(%ul) failed with error code %d\n", dwIoControlCode, WSAGetLastError());
+				if (p_req) {
+					rio_peer_close(p_req);
+				}
+			}
+			else {
+				if (p_req->isudp && udpbuf.len == nbytes) {
+					// In case more data to read, readjust the size per read
+					RIO_SZ_PER_READ *= 2;
+					goto RIO_UDP_MODE_SWITCH_STATE;
+				}
+			}
 
-        rio_buf_t *new_buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + new_nbytes);
-        new_buf->start = ((u_char*) new_buf) + sizeof(rio_buf_t);
-        new_buf->end = (unsigned char*) memcpy(new_buf->start, p_req->in_buff->start, nbytes) + nbytes;
-        new_buf->total_size = new_nbytes;
-        RIO_FREE(p_req->in_buff);
-        p_req->in_buff = new_buf;
-        p_req->next_state = rio_AFT_READ_AND_WRITABLE;
-        goto RIO_UDP_MODE_DATA_READABLE;
-      }
+		}
+		else if (COMPLETION_KEY_IO == CompKey) {
+		RIO_UDP_MODE_SWITCH_STATE:
+			if (p_req->isudp) {
+				switch (p_req->next_state) {
+				case rio_READABLE:
+					riobuf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + RIO_SZ_PER_READ);
+					udpbuf.len =(ULONG) riobuf->total_size = RIO_SZ_PER_READ;
+					udpbuf.buf = riobuf->start = riobuf->end = ((u_char*)riobuf) + sizeof(rio_buf_t);
+					p_req->in_buff = riobuf;
+					udpflag = 0;
+					rc = WSARecvFrom(p_req->listenfd, &udpbuf, 1, (LPDWORD)&nbytes,
+						(LPDWORD)&udpflag, (struct sockaddr*)&p_req->client_addr,
+						&p_req->client_addr_len, &p_req->ovlp, NULL);
 
-    } else if ( COMPLETION_KEY_IO == CompKey ) {
-RIO_UDP_MODE_DATA_READABLE:
-      if (p_req->isudp) {
-        switch (p_req->next_state) {
-        case rio_READABLE:
-          udpbuf.buf = (char*) p_req->in_buff->start;
-          udpbuf.len = (ULONG) p_req->in_buff->total_size;
-          if (WSARecvFrom(p_req->listenfd, &udpbuf, 1, (LPDWORD)&nbytes,
-                          (LPDWORD)&udpflag, (struct sockaddr*)&p_req->client_addr,
-                          &p_req->client_addr_len, &p_req->ovlp, NULL) != 0) {
-            if ((rc_status = WSAGetLastError()) != WSA_IO_PENDING) {
+					if (rc != 0 && (rc_status = WSAGetLastError()) != WSA_IO_PENDING) {
 #ifdef _WIN64
-              fprintf(stderr, "WSARecvFrom error:%d, sock:%lld, bytesRead:%d\r\n", rc_status, p_req->listenfd, nbytes);
+						fprintf(stderr, "WSARecvFrom error:%d, sock:%lld, bytesRead:%d\r\n", rc_status, p_req->listenfd, nbytes);
 #else
-			  fprintf(stderr, "WSARecvFrom error:%d, sock:%Id, bytesRead:%Id\r\n", rc_status, p_req->listenfd, nbytes);
+						fprintf(stderr, "WSARecvFrom error:%d, sock:%Id, bytesRead:%Id\r\n", rc_status, p_req->listenfd, nbytes);
 #endif
-            }
-          }
-          p_req->next_state = rio_AFT_READ_AND_WRITABLE;
-          break;
-        case rio_AFT_READ_AND_WRITABLE:
-          p_req->next_state = rio_IDLE;
-          if (nbytes > 0) {
-            p_req->in_buff->end = p_req->in_buff->start + nbytes;
-            unsigned udpthreadid;
-            HANDLE udp_thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_udp_request_thread, p_req, 0, &udpthreadid);
-            if (udp_thread_hdl == 0) {
-              fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
-            }
-            /*Detach thread*/
-            CloseHandle(udp_thread_hdl);
-          }
-          break;
-        case rio_DONE_WRITE:
-          p_req->on_conn_close_handler(p_req);
-          if (p_req->out_buff) {
-            RIO_FREE(p_req->out_buff);
-            p_req->out_buff = NULL;
-          }
+					}
+					p_req->next_state = rio_AFT_READ_AND_WRITABLE;
+					break;
+				case rio_AFT_READ_AND_WRITABLE:
+					p_req->next_state = rio_IDLE;
+					if (nbytes > 0) {
+						p_req->in_buff->end = p_req->in_buff->start + nbytes;
+						unsigned udpthreadid;
+						HANDLE udp_thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_udp_request_thread, p_req, 0, &udpthreadid);
+						if (udp_thread_hdl == 0) {
+							fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
+						}
+						/*Detach thread*/
+						CloseHandle(udp_thread_hdl);
+					}
+					break;
+				case rio_DONE_WRITE:
+					p_req->on_conn_close_handler(p_req);
+					RIO_FREE_REQ_IN_OUT(p_req);
+					p_req->ctx_val = NULL;
+					p_req->next_state = rio_READABLE;
+					nbytes = 0;
+					goto RIO_UDP_MODE_SWITCH_STATE;
+					break;
+				}
+			}
+			else {
+				rio_on_iocp(p_req, nbytes);
+			}
+		}
+		else if (COMPLETION_KEY_SHUTDOWN == CompKey) {
+			break;
+		}
 
-          p_req->ctx_val = NULL;
-          p_req->next_state = rio_READABLE;
-          goto RIO_UDP_MODE_DATA_READABLE;
-          break;
-        }
-      } else {
-        rio_on_iocp( p_req,  nbytes );
-      }
-    } else if ( COMPLETION_KEY_SHUTDOWN == CompKey ) {
-      break;
-    }
+	}
+	return 0;
+}
 
-  }
-  return 0;
+void
+rio_set_max_polling_event(int opt) {
+	RIO_MAX_POLLING_EVENT = opt;
+}
+
+void
+rio_set_sz_per_read(int opt) {
+	RIO_SZ_PER_READ = opt;
 }
 
 void
 rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
-  rio_buf_t *buf;
-  size_t outsz = RIO_STRLEN(output), curr_size, new_size;
-  if (outsz == 0) {
-    return ;
-  }
-  if (req->out_buff == NULL) {
-    buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
-    if (!buf) {
-      RIO_ERROR("malloc");
-      return;
-    }
-    buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
-    buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
-    buf->total_size = outsz;
-    req->out_buff = buf;
-  } else {
-    curr_size = rio_buf_size(req->out_buff);
-    if ( (curr_size + outsz) > req->out_buff->total_size ) {
-      new_size = (curr_size + outsz) * 2;
-      buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + new_size );
-      if (!buf) {
-        RIO_ERROR("malloc");
-        return;
-      }
-      buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
-      buf->end = ((u_char*) memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
-      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
-      buf->total_size = new_size;
-      RIO_FREE(req->out_buff);
-      req->out_buff = buf;
-    } else {
-      buf = req->out_buff;
-      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
-    }
-  }
+	rio_buf_t *buf;
+	size_t outsz = RIO_STRLEN(output), curr_size, new_size;
+	if (outsz == 0) {
+		return;
+	}
+	if (req->out_buff == NULL) {
+		buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + outsz);
+		if (!buf) {
+			RIO_ERROR("malloc");
+			return;
+		}
+		buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+		buf->end = ((u_char *)memcpy(buf->start, output, outsz)) + outsz;
+		buf->total_size = outsz;
+		req->out_buff = buf;
+	}
+	else {
+		curr_size = rio_buf_size(req->out_buff);
+		if ((curr_size + outsz) > req->out_buff->total_size) {
+			new_size = (curr_size + outsz) * 2;
+			buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + new_size);
+			if (!buf) {
+				RIO_ERROR("malloc");
+				return;
+			}
+			buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+			buf->end = ((u_char*)memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
+			buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+			buf->total_size = new_size;
+			RIO_FREE(req->out_buff);
+			req->out_buff = buf;
+		}
+		else {
+			buf = req->out_buff;
+			buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+		}
+	}
 }
 
 void
 rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t outsz) {
-  rio_buf_t *buf;
-  size_t curr_size, new_size;
-  if (outsz == 0) {
-    return ;
-  }
+	rio_buf_t *buf;
+	size_t curr_size, new_size;
+	if (outsz == 0) {
+		return;
+	}
 
-  if (req->out_buff == NULL) {
-    buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
-    if (!buf) {
-      RIO_ERROR("malloc");
-      return;
-    }
-    buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
-    buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
-    buf->total_size = outsz;
-    req->out_buff = buf;
-  } else {
-    curr_size = rio_buf_size(req->out_buff);
-    if ( (curr_size + outsz) > req->out_buff->total_size ) {
-      new_size = (curr_size + outsz) * 2;
-      buf = (rio_buf_t*)  RIO_MALLOC(sizeof(rio_buf_t) + new_size);
-      if (!buf) {
-        RIO_ERROR("malloc");
-        return;
-      }
-      buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
-      buf->end = ((u_char*) memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
-      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
-      buf->total_size = new_size;
-      RIO_FREE(req->out_buff);
-      req->out_buff = buf;
-    } else {
-      buf = req->out_buff;
-      buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
-    }
-  }
+	if (req->out_buff == NULL) {
+		buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + outsz);
+		if (!buf) {
+			RIO_ERROR("malloc");
+			return;
+		}
+		buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+		buf->end = ((u_char *)memcpy(buf->start, output, outsz)) + outsz;
+		buf->total_size = outsz;
+		req->out_buff = buf;
+	}
+	else {
+		curr_size = rio_buf_size(req->out_buff);
+		if ((curr_size + outsz) > req->out_buff->total_size) {
+			new_size = (curr_size + outsz) * 2;
+			buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + new_size);
+			if (!buf) {
+				RIO_ERROR("malloc");
+				return;
+			}
+			buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+			buf->end = ((u_char*)memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
+			buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+			buf->total_size = new_size;
+			RIO_FREE(req->out_buff);
+			req->out_buff = buf;
+		}
+		else {
+			buf = req->out_buff;
+			buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+		}
+	}
 }
 
 static void
 rio_interrupt_handler(int signal) {
-  TerminateProcess(g_pi.hProcess, 0);
-  ExitProcess(0);
+	TerminateProcess(g_pi.hProcess, 0);
+	ExitProcess(0);
 }
 
 BOOL WINAPI
 console_ctrl_handler(DWORD ctrl) {
-  switch ( ctrl )
-  {
-  case CTRL_C_EVENT:
-  case CTRL_CLOSE_EVENT:
-  case CTRL_BREAK_EVENT:
-  case CTRL_LOGOFF_EVENT:
-  case CTRL_SHUTDOWN_EVENT:
-    TerminateProcess(g_pi.hProcess, 0);
-    return TRUE;
-  default:
-    return FALSE;
-  }
+	switch (ctrl)
+	{
+	case CTRL_C_EVENT:
+	case CTRL_CLOSE_EVENT:
+	case CTRL_BREAK_EVENT:
+	case CTRL_LOGOFF_EVENT:
+	case CTRL_SHUTDOWN_EVENT:
+		TerminateProcess(g_pi.hProcess, 0);
+		return TRUE;
+	default:
+		return FALSE;
+	}
 }
 
 rio_instance_t*
 rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg) {
 	rio_instance_t *instance;
+
+	IocpBuf.len = RIO_SZ_PER_READ;
+	IocpBuf.buf = RIO_MALLOC(RIO_SZ_PER_READ * sizeof(unsigned char));
 
 #if defined(UNICODE) || defined(_UNICODE)
 	typedef WCHAR RIOCMD_CHAR;
@@ -476,7 +509,7 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg) {
 	SIZE_T cmd_len = rio_cmdlen(cmd_str);
 	SIZE_T childcmd_len = rio_cmdlen(child_cmd_str);
 	SIZE_T spawn_child_cmd_len = cmd_len + childcmd_len + 1; // 1 for NULL terminator
-//	goto CONTINUE_CHILD_IOCP_PROCESS;
+	goto CONTINUE_CHILD_IOCP_PROCESS;
 	if (cmd_len > childcmd_len) {
 		RIOCMD_CHAR *p_cmd_str = cmd_str + cmd_len - sizeof("routeio-child-proc");
 
@@ -498,7 +531,7 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg) {
 		si.cb = sizeof(si);
 		ZeroMemory(&g_pi, sizeof(g_pi));
 
-		RIOCMD_CHAR *spawn_child_cmd_str = (RIOCMD_CHAR*)malloc(spawn_child_cmd_len * sizeof(RIOCMD_CHAR));
+		RIOCMD_CHAR *spawn_child_cmd_str = (RIOCMD_CHAR*)RIO_MALLOC(spawn_child_cmd_len * sizeof(RIOCMD_CHAR));
 		ZeroMemory(spawn_child_cmd_str, spawn_child_cmd_len * sizeof(RIOCMD_CHAR));
 
 		int i, j;
@@ -559,118 +592,120 @@ CONTINUE_CHILD_IOCP_PROCESS:
 }
 
 int
-rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
-               SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler) {
-  int i, optval = 1;
-  rio_request_t *preq;
-  SOCKET listenfd;
-  if ((listenfd = socket(AF_INET , SOCK_DGRAM , 0 )) == INVALID_SOCKET) {
-    fprintf(stderr, "socket(AF_INET , SOCK_DGRAM , 0 ) failed %d\n", WSAGetLastError());
-  }
+rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler,
+	rio_on_conn_close_pt on_conn_close_handler) {
+	int i, optval = 1;
+	rio_request_t *preq;
+	SOCKET listenfd;
+	if ((listenfd = WSASocket(PF_INET, SOCK_DGRAM, IPPROTO_IP, 0, 0, WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET) {
+		fprintf(stderr, "socket(AF_INET , SOCK_DGRAM , 0 ) failed %d\n", WSAGetLastError());
+	}
 
-  struct sockaddr_in server_addr = {0};
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.S_un.S_addr = INADDR_ANY;
-  server_addr.sin_port = htons( port );
+	struct sockaddr_in server_addr = { 0 };
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.S_un.S_addr = INADDR_ANY;
+	server_addr.sin_port = htons(port);
 
-  if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&optval , sizeof(optval)) < 0) {
-    fprintf(stderr, "setsockopt(SO_REUSEADDR) failed %d\n", WSAGetLastError());
-  }
+	if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&optval, sizeof(optval)) < 0) {
+		fprintf(stderr, "setsockopt(SO_REUSEADDR) failed %d\n", WSAGetLastError());
+	}
 
 
-  if (bind( listenfd, (struct sockaddr*)&server_addr, sizeof(server_addr) ) != 0 ) {
-    fprintf(stderr, "Error while socket binding %d\n", WSAGetLastError());
-    return -1;
-  }
+	if (bind(listenfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
+		fprintf(stderr, "Error while socket binding %d\n", WSAGetLastError());
+		return -1;
+	}
 
-  if (CreateIoCompletionPort( (HANDLE)listenfd, instance->iocp, COMPLETION_KEY_IO, 0 ) == NULL) {
-    fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
-    return -1;
-  }
+	if (CreateIoCompletionPort((HANDLE)listenfd, instance->iocp, COMPLETION_KEY_IO, 0) == NULL) {
+		fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
+		return -1;
+	}
 
-  /**Multhread accept event per socket**/
-  for (i = 0; i < backlog; i++) {
-    if ( (preq = rio_create_udp_request_event(listenfd, instance->iocp, size_per_read) ) == NULL ) {
-      fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
-      return -1;
-    }
-    if (on_conn_close_handler == NULL) {
-      on_conn_close_handler = rio_def_on_conn_close_handler;
-    }
-    preq->on_conn_close_handler = on_conn_close_handler;
-    preq->read_handler = read_handler;
-    preq->iocp = instance->iocp;
-  }
+	/**Multhread accept event per socket**/
+	for (i = 0; i < RIO_MAX_POLLING_EVENT; i++) {
+		if ((preq = rio_create_udp_request_event(listenfd, instance->iocp)) == NULL) {
+			fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
+			return -1;
+		}
+		if (on_conn_close_handler == NULL) {
+			on_conn_close_handler = rio_def_on_conn_close_handler;
+		}
+		preq->on_conn_close_handler = on_conn_close_handler;
+		preq->read_handler = read_handler;
+		preq->iocp = instance->iocp;
+		//preq->sock = listenfd;
+	}
 
-  return 0;
+	return 0;
 }
 
 int
 rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler,
-               int backlog, SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler) {
-  int i, optval = 1;
-  rio_request_t *preq;
-  SOCKET listenfd = WSASocket( PF_INET, SOCK_STREAM, IPPROTO_TCP, 0, 0, WSA_FLAG_OVERLAPPED );
+	int backlog, rio_on_conn_close_pt on_conn_close_handler) {
+	int i, optval = 1;
+	rio_request_t *preq;
+	SOCKET listenfd = WSASocket(PF_INET, SOCK_STREAM, IPPROTO_TCP, 0, 0, WSA_FLAG_OVERLAPPED);
 
-  struct sockaddr_in Addr = {0};
-  Addr.sin_family = AF_INET;
-  Addr.sin_addr.S_un.S_addr = INADDR_ANY;
-  Addr.sin_port = htons( port );
+	struct sockaddr_in Addr = { 0 };
+	Addr.sin_family = AF_INET;
+	Addr.sin_addr.S_un.S_addr = INADDR_ANY;
+	Addr.sin_port = htons(port);
 
-  if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&optval , sizeof(optval)) < 0) {
-    perror("setsockopt(SO_REUSEADDR) failed");
-  }
+	if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&optval, sizeof(optval)) < 0) {
+		perror("setsockopt(SO_REUSEADDR) failed");
+	}
 #ifdef SO_REUSEPORT
-  if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEPORT, (const char*)&optval, sizeof(optval)) < 0)
-    perror("setsockopt(SO_REUSEPORT) failed");
+	if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEPORT, (const char*)&optval, sizeof(optval)) < 0)
+		perror("setsockopt(SO_REUSEPORT) failed");
 #endif
-  if (bind( listenfd, (struct sockaddr*)&Addr, sizeof(struct sockaddr_in) ) != 0 ) {
-    fprintf(stderr, "Error while socket binding %d\n", WSAGetLastError());
-    return -1;
-  }
+	if (bind(listenfd, (struct sockaddr*)&Addr, sizeof(struct sockaddr_in)) != 0) {
+		fprintf(stderr, "Error while socket binding %d\n", WSAGetLastError());
+		return -1;
+	}
 
-  if (listen( listenfd, backlog ) != 0 ) {
-    fprintf(stderr, "Error while socket listening %d\n", WSAGetLastError());
-    return -1;
-  }
+	if (listen(listenfd, backlog) != 0) {
+		fprintf(stderr, "Error while socket listening %d\n", WSAGetLastError());
+		return -1;
+	}
 
-  if (CreateIoCompletionPort( (HANDLE)listenfd, instance->iocp, COMPLETION_KEY_IO, 0 ) == NULL) {
-    fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
-    return -1;
-  }
+	if (CreateIoCompletionPort((HANDLE)listenfd, instance->iocp, COMPLETION_KEY_IO, 0) == NULL) {
+		fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
+		return -1;
+	}
 
-  /**Multhread accept event per socket**/
-  for (i = 0; i < backlog; i++) {
-    if ( (preq = rio_create_request_event(listenfd, instance->iocp, size_per_read) ) == NULL ) {
-      fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
-      return -1;
-    }
+	/**Multhread accept event per socket**/
+	for (i = 0; i < RIO_MAX_POLLING_EVENT; i++) {
+		if ((preq = rio_create_request_event(listenfd, instance->iocp)) == NULL) {
+			fprintf(stderr, "Error while creating tcp iocp %d\n", GetLastError());
+			return -1;
+		}
 
-    if (on_conn_close_handler == NULL) {
-      on_conn_close_handler = rio_def_on_conn_close_handler;
-    }
-    preq->on_conn_close_handler = on_conn_close_handler;
-    preq->read_handler = read_handler;
-    preq->isudp = 0;
-    preq->ctx_val = NULL;
-    preq->out_buff = NULL;
-  }
+		if (on_conn_close_handler == NULL) {
+			on_conn_close_handler = rio_def_on_conn_close_handler;
+		}
+		preq->on_conn_close_handler = on_conn_close_handler;
+		preq->read_handler = read_handler;
+		preq->isudp = 0;
+		preq->ctx_val = NULL;
+		preq->out_buff = NULL;
+	}
 
-  return 0;
+	return 0;
 }
 
 int
 rio_start(rio_instance_t *instance) {
-  TCHAR *cmd_str = GetCommandLine();
-  SIZE_T sizeof_cmdline = RIO_STRLEN(cmd_str);
-  SIZE_T sizeof_childcmd = sizeof("routeio-child-proc") - 1;
-  if (instance->init_handler) {
-    instance->init_handler(instance->init_arg);
-  }
-  rio_run_iocp_worker(instance);
+	TCHAR *cmd_str = GetCommandLine();
+	SIZE_T sizeof_cmdline = RIO_STRLEN(cmd_str);
+	SIZE_T sizeof_childcmd = sizeof("routeio-child-proc") - 1;
+	if (instance->init_handler) {
+		instance->init_handler(instance->init_arg);
+	}
+	rio_run_iocp_worker(instance);
 
-  return 0;
+	return 0;
 }
+
 #elif !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)/*Linux*/
 
 #define _GNU_SOURCE 1

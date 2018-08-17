@@ -92,7 +92,13 @@ extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_p
                           SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
 ```
 
-### every event connection has *size_per_read* specify, if you set 64 backlog, which mean 64 events has different *size_per_read*, size_per_read is expandable if has more data to read. 
+### reconfig the polling events and size per connection read API
+```c
+
+extern void rio_set_max_polling_event(int opt);
+extern void rio_set_sz_per_read(int opt);
+
+```
 
 
 ## for Windows os build

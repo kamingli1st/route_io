@@ -1425,7 +1425,6 @@ rt;\
 }else if(n == 0) { \
 rt;}
 
-
 #define DEF_KQ_TIMEOUT 5000
 #define MAX_ROUTEIO_FD 1024
 static ssize_t udp_rd_persz = 2048;

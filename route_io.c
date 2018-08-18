@@ -1426,7 +1426,6 @@ rt;\
 rt;}
 
 #define DEF_KQ_TIMEOUT 5000
-#define MAX_ROUTEIO_FD 1024
 static ssize_t udp_rd_persz = 2048;
 static unsigned char* udp_buf = NULL;
 typedef void (*rio_signal_handler_pt)(int);
@@ -1805,6 +1804,7 @@ STREAM_RESTART:
   if (!has_init_signal) {
     rio_add_signal_handler(rio_signal_backtrace);
   }
+ 
   ch_pid = fork();
   if (ch_pid == -1) {
     perror("fork");
@@ -1879,7 +1879,7 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void* arg) {
   }
 
   // Only allow maximum 1024 file descriptor
-  instance->__int_req = RIO_MALLOC(MAX_ROUTEIO_FD *  sizeof(rio_request_t*) );
+  instance->__int_req = RIO_MALLOC(__RIO_MAX_POLLING_EVENT__ *  sizeof(rio_request_t*) );
 
   instance->nevents = 0;
   instance->init_handler = init_handler;
@@ -1994,8 +1994,8 @@ rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
   int fd;
   rio_request_t *p_req;
 
-  if (instance->nevents >= MAX_ROUTEIO_FD) {
-    fprintf(stderr, "the over max file fd %d", MAX_ROUTEIO_FD);
+  if (instance->nevents >= __RIO_MAX_POLLING_EVENT__) {
+    fprintf(stderr, "the over max file fd %d", __RIO_MAX_POLLING_EVENT__);
     return -1;
   }
 
@@ -2041,8 +2041,8 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
   int fd;
   rio_request_t *p_req;
 
-  if (instance->nevents >= MAX_ROUTEIO_FD) {
-    fprintf(stderr, "the over max file fd %d", MAX_ROUTEIO_FD);
+  if (instance->nevents >= __RIO_MAX_POLLING_EVENT__) {
+    fprintf(stderr, "the over max file fd %d", __RIO_MAX_POLLING_EVENT__);
     return -1;
   }
 

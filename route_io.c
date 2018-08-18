@@ -740,7 +740,6 @@ rio_start(rio_instance_t *instance) {
 #define RIO_ERROR(errmsg) fprintf(stderr, "%s - %s\n", errmsg, strerror(errno) )
 #define RIO_MALLOC malloc
 #define RIO_FREE(p) free(p);p=NULL
-#define RIO_DEF_BUF_SIZE 1024
 #define RIO_DEF_LOGGER_ stderr
 // #define RIO_IS_WRITABLE(ev) lfqueue_size(&ev->out_queue)
 #define RIO_STRLEN(p) strlen((char*)p)
@@ -958,20 +957,20 @@ rio_read_tcp_handler_spawn(void *req_) {
     goto ERROR_EXIT_REQUEST;
 
   fd = req->sockfd;
-  buf = RIO_MALLOC(sizeof(rio_buf_t) + RIO_DEF_BUF_SIZE );
+  buf = RIO_MALLOC(sizeof(rio_buf_t) + __RIO_SZ_PER_READ__ );
   if (buf == NULL) {
     RIO_ERROR("No Enough memory allocated");
     goto ERROR_EXIT_REQUEST;
   }
-  buf->total_size = RIO_DEF_BUF_SIZE;
+  buf->total_size = __RIO_SZ_PER_READ__;
   buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);
 
 REREAD:
   do {
-    if ((bytes_read = recv( fd , buf->end, RIO_DEF_BUF_SIZE, 0)) > 0 ) {
+    if ((bytes_read = recv( fd , buf->end, __RIO_SZ_PER_READ__, 0)) > 0 ) {
       buf->end += bytes_read;
       size_t curr_size = buf->end - buf->start;
-      if ( curr_size + RIO_DEF_BUF_SIZE > buf->total_size ) {
+      if ( curr_size + __RIO_SZ_PER_READ__ > buf->total_size ) {
         new_buf = RIO_MALLOC(sizeof(rio_buf_t) + buf->total_size * 2);
         if (!new_buf) {
           RIO_ERROR("Error creating thread\n");
@@ -1411,18 +1410,9 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 #define RIO_ERROR(errmsg) fprintf(stderr, "%s - %s\n", errmsg, strerror(errno) )
 #define RIO_MALLOC malloc
 #define RIO_FREE(p) free(p);p=NULL
-#define RIO_DEF_BUF_SIZE 1024
 #define RIO_DEF_LOGGER_ stderr
 #define RIO_STRLEN(p) strlen((char*)p)
-
-#define RIO_WAIT_FOR_READ_WRITE
-#define RIO_RELEASE_WAIT_FOR_READ_WRITE
-
 #define RIO_ADD_FD(instance, monitor_ev) kevent(instance->kqfd, monitor_ev, 1, NULL, 0, NULL)
-#define RIO_MODIFY_FD(instance, fd, ee) epoll_ctl(instance->epfd, EPOLL_CTL_MOD, fd, ee)
-#define RIO_DEL_FD(instance, fd, ee) \
-if(epoll_ctl(instance->epfd, EPOLL_CTL_DEL, fd, ee) == -1) {\
-RIO_ERROR("error while del fd"); }
 
 #define RIO_TCP_CHECK_TRY(n, nextstep, rt) \
 if(n<0){\
@@ -1635,20 +1625,20 @@ rio_read_tcp_handler_spawn(void *req_) {
     goto ERROR_EXIT_REQUEST;
 
   fd = req->sockfd;
-  buf = RIO_MALLOC(sizeof(rio_buf_t) + RIO_DEF_BUF_SIZE );
+  buf = RIO_MALLOC(sizeof(rio_buf_t) + __RIO_SZ_PER_READ__ );
   if (buf == NULL) {
     RIO_ERROR("No Enough memory allocated");
     goto ERROR_EXIT_REQUEST;
   }
-  buf->total_size = RIO_DEF_BUF_SIZE;
+  buf->total_size = __RIO_SZ_PER_READ__;
   buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);
 
 REREAD:
   do {
-    if ((bytes_read = recv( fd , buf->end, RIO_DEF_BUF_SIZE, 0)) > 0 ) {
+    if ((bytes_read = recv( fd , buf->end, __RIO_SZ_PER_READ__, 0)) > 0 ) {
       buf->end += bytes_read;
       size_t curr_size = buf->end - buf->start;
-      if ( curr_size + RIO_DEF_BUF_SIZE > buf->total_size ) {
+      if ( curr_size + __RIO_SZ_PER_READ__ > buf->total_size ) {
         new_buf = RIO_MALLOC(sizeof(rio_buf_t) + buf->total_size * 2);
         if (!new_buf) {
           RIO_ERROR("Error creating thread\n");

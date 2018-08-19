@@ -1104,7 +1104,7 @@ rio_run_epoll(rio_instance_t *instance) {
       }
 
       if ( settimeout(fd, 1000, 1000) == -1 ) {
-        return -1;
+          RIO_ERROR("Error set Time out \n");
       }
 
       sub_req = RIO_MALLOC(sizeof(rio_request_t));
@@ -1408,11 +1408,13 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 
 #define RIO_DEBUG(msg) fprintf(stderr, "%s\n", msg)
 #define RIO_ERROR(errmsg) fprintf(stderr, "%s - %s\n", errmsg, strerror(errno) )
+#define RIO_CHECK_IF_ERROR(rc, nextstep, ...) if(rc) {printf(__VA_ARGS__); printf("error no: %d error msg %s\n", errno, strerror(errno)); nextstep;}
 #define RIO_MALLOC malloc
 #define RIO_FREE(p) free(p);p=NULL
 #define RIO_DEF_LOGGER_ stderr
 #define RIO_STRLEN(p) strlen((char*)p)
 #define RIO_ADD_FD(instance, monitor_ev) kevent(instance->kqfd, monitor_ev, 1, NULL, 0, NULL)
+#define RIO_DEF_AUTO_SIZE 1024
 
 #define RIO_TCP_CHECK_TRY(n, nextstep, rt) \
 if(n<0){\
@@ -1426,8 +1428,7 @@ rt;\
 rt;}
 
 #define DEF_KQ_TIMEOUT 5000
-static ssize_t udp_rd_persz = 2048;
-static unsigned char* udp_buf = NULL;
+static unsigned char* auto_buf = NULL;
 typedef void (*rio_signal_handler_pt)(int);
 
 static struct sigaction sa;
@@ -1445,7 +1446,8 @@ static void rio_def_on_conn_close_handler(rio_request_t *req) {
   /*Do nothing*/
 }
 
-void *rio_read_udp_handler_spawn(void *req_);
+size_t rio_read_readbyte(int);
+size_t rio_read_readbyte_autosize(int);
 void *rio_read_tcp_handler_spawn(void *req_);
 
 static int
@@ -1469,6 +1471,7 @@ rio_set_max_polling_event(int opt) {
   __RIO_MAX_POLLING_EVENT__ = opt;
 }
 
+/** if set -1, it read as many as it can **/
 void
 rio_set_sz_per_read(int opt) {
   __RIO_SZ_PER_READ__ = opt;
@@ -1591,6 +1594,23 @@ rio_create_fd(u_short port, short af_family, int socket_type, int protocol, int 
   return sockfd;
 }
 
+size_t
+rio_read_readbyte(int fd) {
+    return __RIO_SZ_PER_READ__; // just return what it has
+}
+
+size_t
+rio_read_readbyte_autosize(int fd) {
+    size_t nbytes;
+    while ( (nbytes = recv(fd, auto_buf, __RIO_SZ_PER_READ__, MSG_PEEK)) == __RIO_SZ_PER_READ__) {
+        __RIO_SZ_PER_READ__ *= 2;
+        free(auto_buf);
+        auto_buf = RIO_MALLOC(__RIO_SZ_PER_READ__ * sizeof(unsigned char));
+        memset(auto_buf, 0, __RIO_SZ_PER_READ__ * sizeof(unsigned char));
+    }
+    return nbytes;
+}
+
 void *
 rio_read_udp_handler_spawn(void *_req) {
   rio_request_t *req = (rio_request_t*)_req;
@@ -1613,81 +1633,64 @@ rio_read_udp_handler_spawn(void *_req) {
 
 void *
 rio_read_tcp_handler_spawn(void *req_) {
-  rio_request_t *req = (rio_request_t*)req_;
-  // rio_instance_t *instance = req->instance;
-  int fd;
-  rio_buf_t * buf, *new_buf;
-  ssize_t bytes_read, bytes_send, est_bytes_left = 0;
-
-  if (req->sockfd < 0)
-    goto ERROR_EXIT_REQUEST;
-
-  fd = req->sockfd;
-  buf = RIO_MALLOC(sizeof(rio_buf_t) + __RIO_SZ_PER_READ__ );
-  if (buf == NULL) {
-    RIO_ERROR("No Enough memory allocated");
-    goto ERROR_EXIT_REQUEST;
-  }
-  buf->total_size = __RIO_SZ_PER_READ__;
-  buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);
-
-REREAD:
-  do {
-    if ((bytes_read = recv( fd , buf->end, __RIO_SZ_PER_READ__, 0)) > 0 ) {
-      buf->end += bytes_read;
-      size_t curr_size = buf->end - buf->start;
-      if ( curr_size + __RIO_SZ_PER_READ__ > buf->total_size ) {
-        new_buf = RIO_MALLOC(sizeof(rio_buf_t) + buf->total_size * 2);
-        if (!new_buf) {
-          RIO_ERROR("Error creating thread\n");
-          goto EXIT_REQUEST;
+    rio_request_t *req = (rio_request_t*)req_;
+    rio_buf_t * buf = req->in_buff;
+    int fd, nbytes = (int)buf->total_size;
+    size_t bytes_send;
+    
+    if (req->sockfd < 0 || nbytes == 0)
+        goto CLOSE_EXIT_REQUEST;
+    
+    fd = req->sockfd;
+    
+    if ((nbytes =(int) recv( fd , buf->start, nbytes, 0)) > 0 ) {
+        buf->end = buf->start + nbytes;
+    }
+    
+    RIO_TCP_CHECK_TRY(nbytes, RIO_FREE(buf);goto REREAD, RIO_FREE(buf);goto CLOSE_EXIT_REQUEST);
+    
+    req->in_buff = buf;
+    
+    req->read_handler(req);
+    
+    if ( req->out_buff && (bytes_send = req->out_buff->end - req->out_buff->start) ) {
+        while ( (nbytes = (int) send(req->sockfd, req->out_buff->start, bytes_send, 0)) < 0) {
+            RIO_TCP_CHECK_TRY(nbytes, continue, goto EXIT_REQUEST);
         }
-        new_buf->start = ((u_char*) new_buf) + sizeof(rio_buf_t);
-        new_buf->end = ((u_char*) memcpy(new_buf->start, buf->start, curr_size)) + curr_size;
-        new_buf->total_size = buf->total_size * 2;
-        RIO_FREE(buf);
-        buf = new_buf;
-      }
-      ioctl(fd, FIONREAD, &est_bytes_left);
     }
-  } while (est_bytes_left > 0);
-
-  RIO_TCP_CHECK_TRY(bytes_read, goto REREAD, goto EXIT_REQUEST);
-
-  if ((buf->end - buf->start) == 0) {
-    goto EXIT_REQUEST;
-  }
-  req->in_buff = buf;
-
-  req->read_handler(req);
-
-  if ( req->out_buff && (bytes_send = req->out_buff->end - req->out_buff->start) ) {
-    while ( (bytes_read = send(req->sockfd, req->out_buff->start, bytes_send, 0)) < 0) {
-      RIO_TCP_CHECK_TRY(bytes_read, continue, goto EXIT_REQUEST);
-    }
-  }
-
-  if (buf) {
-    buf->end = buf->start;
-  }
-  if (req->out_buff) {
-    RIO_FREE(req->out_buff);
-    req->out_buff = NULL;
-  }
-
-  goto REREAD;
-
+    
 EXIT_REQUEST:
-  RIO_FREE(buf);
-ERROR_EXIT_REQUEST:
-  if (req) {
-    rio_do_close(req->sockfd);
-    // if (req->in_buff)RIO_FREE(req->in_buff); << it will be freed at line:930
-    if (req->out_buff)RIO_FREE(req->out_buff);
-    req->on_conn_close_handler(req);
-    RIO_FREE(req);
-  }
-  pthread_exit(NULL);
+    if (buf) {
+        RIO_FREE(buf);
+    }
+    if (req->out_buff) {
+        RIO_FREE(req->out_buff);
+        req->out_buff = NULL;
+    }
+    
+    if(!req->close) {
+        goto REREAD;
+    }
+    
+CLOSE_EXIT_REQUEST:
+    if (req) {
+        rio_do_close(req->sockfd);
+        // if (req->in_buff)RIO_FREE(req->in_buff); << it will be freed at line:930
+        if (req->out_buff)RIO_FREE(req->out_buff);
+        req->on_conn_close_handler(req);
+        RIO_FREE(req);
+    }
+    pthread_exit(NULL);
+    return NULL;
+REREAD:
+    req->sockfd = -1;
+    struct kevent mev;
+    EV_SET(&mev, fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, (void*)req);
+    if (RIO_ADD_FD(req->instance, &mev )) {
+        RIO_ERROR("error add kevent");
+    }
+    
+    pthread_exit(NULL);
 }
 
 static int
@@ -1704,6 +1707,7 @@ rio_run_kqueue(rio_instance_t *instance) {
   static const long waitms = DEF_KQ_TIMEOUT;
   timeout.tv_sec = waitms / 1000;
   timeout.tv_nsec = (waitms % 1000) * 1000 * 1000;
+  uintptr_t identid;
 
   memset(kevents, 0, instance->nevents * sizeof(struct kevent));
 
@@ -1716,7 +1720,8 @@ rio_run_kqueue(rio_instance_t *instance) {
   }
 
   for (i = 0; i < n; i++) {
-    if (parent_id == (pid_t)kevents[i].ident) {
+    identid = kevents[i].ident;
+    if (parent_id == (pid_t)identid) {
       // Parent has exited
       fprintf(stderr, "Parent Proc has exited\n\n");
       return 1;
@@ -1727,14 +1732,9 @@ rio_run_kqueue(rio_instance_t *instance) {
     if (evstate == EVFILT_READ) {
       if (main_req->isudp) {
         fd = main_req->sockfd;
-        while ( (nbytes = recv(fd, udp_buf, udp_rd_persz, MSG_PEEK)) == udp_rd_persz) {
-          udp_rd_persz *= 2;
-          free(udp_buf);
-          udp_buf = RIO_MALLOC(udp_rd_persz * sizeof(unsigned char));
-          memset(udp_buf, 0, udp_rd_persz * sizeof(unsigned char));
-        }
+        nbytes = instance->__read_nbyte_mth(fd);
         if (nbytes > 0) {
-          buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + nbytes);
+          buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + nbytes + 1);
           if (buf == NULL) {
             RIO_ERROR("No Enough memory allocated");
             return -1;
@@ -1756,38 +1756,61 @@ rio_run_kqueue(rio_instance_t *instance) {
             RIO_FREE(sub_req->in_buff);
             RIO_FREE(sub_req);
             RIO_ERROR("Error creating thread\n");
-            return -1;
+            sleep(1);
+          } else {
+            pthread_detach(t);
           }
-          pthread_detach(t);
         }
-
       } else {
-        // Get new connection
-        if ((fd = accept( main_req->sockfd, (struct sockaddr *)&main_req->client_addr,
-                          &main_req->client_addr_len)) < 0) {
-          RIO_ERROR("Error while accepting port\n");
-          continue;
-        }
+        if(main_req->sockfd == -1) {
+            main_req->sockfd = (int)identid;
+            
+            nbytes = instance->__read_nbyte_mth(main_req->sockfd);
+            
+            buf = RIO_MALLOC(sizeof(rio_buf_t) + nbytes + 1);
+            if (buf == NULL) {
+                RIO_ERROR("No Enough memory allocated");
+                RIO_FREE(main_req);
+                continue;
+            }
+            buf->total_size = nbytes;
+            buf->start = buf->end = ((u_char*) buf) + sizeof(rio_buf_t);
+            main_req->in_buff = buf;
+            pthread_t t;
+            if (pthread_create(&t, NULL, rio_read_tcp_handler_spawn, main_req)) {
+                RIO_FREE(main_req);
+                RIO_ERROR("Error creating thread\n");
+                sleep(1);
+            } else {
+                pthread_detach(t);
+            }
+        } else {
+            // Get new connection
+            if ((fd = accept( main_req->sockfd, (struct sockaddr *)&main_req->client_addr,
+                              &main_req->client_addr_len)) < 0) {
+              RIO_ERROR("Error while accepting port\n");
+              continue;
+            }
 
-        if ( settimeout(fd, 1000, 1000) == -1 ) {
-          return -1;
-        }
+            if ( settimeout(fd, 1000, 1000) == -1 ) {
+              RIO_ERROR("Error set Time out \n");
+            }
 
-        sub_req = RIO_MALLOC(sizeof(rio_request_t));
-        if (sub_req == NULL) {
-          RIO_ERROR("No Enough memory allocated");
-          return ENOMEM;
+            sub_req = RIO_MALLOC(sizeof(rio_request_t));
+            if (sub_req == NULL) {
+              RIO_ERROR("No Enough memory allocated");
+              return ENOMEM;
+            }
+            memcpy(sub_req, main_req, sizeof(rio_request_t));
+            sub_req->sockfd = -1;
+            
+            struct kevent mev;
+            EV_SET(&mev, fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, (void*)sub_req);
+            if (RIO_ADD_FD(instance, &mev )) {
+                RIO_ERROR("error add kevent");
+                return -1;
+            }
         }
-        memcpy(sub_req, main_req, sizeof(rio_request_t));
-        sub_req->sockfd = fd;
-
-        pthread_t t;
-        if (pthread_create(&t, NULL, rio_read_tcp_handler_spawn, sub_req)) {
-          RIO_FREE(sub_req);
-          RIO_ERROR("Error creating thread\n");
-          return -1;
-        }
-        pthread_detach(t);
       }
     }
   }
@@ -1800,12 +1823,24 @@ int
 rio_start(rio_instance_t *instance) {
   int r;
   pid_t ch_pid, w_pid;
+
+    if(__RIO_SZ_PER_READ__ < 0) {
+        instance->__read_nbyte_mth = &rio_read_readbyte_autosize;
+        __RIO_SZ_PER_READ__ = RIO_DEF_AUTO_SIZE;
+    } else {
+        instance->__read_nbyte_mth = &rio_read_readbyte;
+    }
+    
 STREAM_RESTART:
   if (!has_init_signal) {
     rio_add_signal_handler(rio_signal_backtrace);
   }
- 
-  ch_pid = fork();
+    
+  if(__RIO_NO_FORK_PROCESS__) {
+    ch_pid = 0;
+  } else {
+    ch_pid = fork();
+  }
   if (ch_pid == -1) {
     perror("fork");
     exit(EXIT_FAILURE);
@@ -1821,21 +1856,26 @@ STREAM_RESTART:
     }
 
     for (i = 0; i < instance->nevents; i++) {
-      struct kevent mev;
       preq = instance->__int_req[i];
+      struct kevent mev;
       EV_SET(&mev, preq->sockfd, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, (void*)preq);
       if (RIO_ADD_FD(instance, &mev )) {
         RIO_ERROR("error add kevent");
         return -1;
       }
     }
-
-    instance->parent_proc_id = getppid();
-
-    struct kevent pkevent;
-    EV_SET(&pkevent, instance->parent_proc_id , EVFILT_PROC, EV_ADD | EV_ENABLE, NOTE_EXIT, 0, NULL);
-    kevent(instance->kqfd, &pkevent, 1, NULL, 0, NULL);
-
+    /** get one set one kqueue event ready,  instance->nevents * 2 for 1 set of read events  **/
+    instance->nevents = __RIO_MAX_POLLING_EVENT__ * 2;
+    
+    /** for parent process id **/
+    if(__RIO_NO_FORK_PROCESS__) {
+        instance->parent_proc_id = -1; // UNSET if no fork
+    } else {
+        instance->parent_proc_id = getppid();
+        struct kevent pkevent;
+        EV_SET(&pkevent, instance->parent_proc_id , EVFILT_PROC, EV_ADD | EV_ENABLE, NOTE_EXIT, 0, NULL);
+        kevent(instance->kqfd, &pkevent, 1, NULL, 0, NULL);
+    }
     /** Init kq events **/
     if ((instance->kevents = (struct kevent*) RIO_MALLOC(instance->nevents * sizeof(struct kevent))) == NULL) {
       fprintf(stderr, "%s\n", "error malloc");
@@ -1885,9 +1925,14 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void* arg) {
   instance->init_handler = init_handler;
   instance->init_arg = arg;
 
-  if (!udp_buf) {
-    udp_buf = RIO_MALLOC(udp_rd_persz * sizeof(unsigned char));
-    memset(udp_buf, 0, udp_rd_persz * sizeof(unsigned char));
+  if (!auto_buf) {
+      if(__RIO_SZ_PER_READ__ > 0) {
+          auto_buf = RIO_MALLOC(__RIO_SZ_PER_READ__ * sizeof(unsigned char));
+          memset(auto_buf, 0, __RIO_SZ_PER_READ__ * sizeof(unsigned char));
+      } else {
+          auto_buf = RIO_MALLOC(RIO_DEF_AUTO_SIZE * sizeof(unsigned char));
+          memset(auto_buf, 0, RIO_DEF_AUTO_SIZE * sizeof(unsigned char));
+      }
   }
 
   return instance;
@@ -2022,6 +2067,7 @@ rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
   }
   p_req->on_conn_close_handler = on_conn_close_handler;
   p_req->isudp = 1;
+  p_req->close = 0;
   p_req->sockfd = fd;//fcntl(fd, F_DUPFD, 0);
   p_req->instance = instance;
 
@@ -2068,6 +2114,7 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
   }
   p_req->on_conn_close_handler = on_conn_close_handler;
   p_req->isudp = 0;
+  p_req->close = 0;
   p_req->sockfd = fd;
   p_req->instance = instance;
 

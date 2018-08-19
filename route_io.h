@@ -148,7 +148,7 @@ struct rio_instance_s {
         rio_instance_t *instance;
         rio_read_handler_pt read_handler;
         rio_on_conn_close_pt on_conn_close_handler;
-        struct epoll_event *epev;
+        int close;
     };
     
     struct rio_instance_s {
@@ -159,6 +159,7 @@ struct rio_instance_s {
         rio_request_t **__int_req;
         pid_t parent_proc_id;
         void* init_arg;
+        size_t (*__read_nbyte_mth)(int);
     };
     
 

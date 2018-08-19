@@ -15,13 +15,17 @@ void init_instance(void *arg) {
 }
 
 void read_handler(rio_request_t *req) {
-	int nbytes = rio_buf_size(req->in_buff);
-	printf("Readed bytes is %d\n", nbytes);
+	size_t nbytes = rio_buf_size(req->in_buff);
+	printf("Readed bytes is %zu\n", nbytes);
+    if (req->ctx_val == NULL) {
+        req->ctx_val = malloc(1);
+    }
 
 	rio_write_output_buffer_l(req, req->in_buff->start, nbytes);
 
 	rio_write_output_buffer(req, (unsigned char*) "\n");
-
+    
+    req->close = 1;
 }
 
 void on_conn_close_handler(rio_request_t *req) {
@@ -33,8 +37,9 @@ void on_conn_close_handler(rio_request_t *req) {
 }
 
 int main(void) {
-	rio_set_max_polling_event(1024);
-	rio_set_sz_per_read(2048);
+    rio_set_no_fork();
+	rio_set_max_polling_event(2);
+	rio_set_sz_per_read(-1);
 
 	rio_instance_t * instance = rio_create_routing_instance(init_instance, NULL);
 	rio_add_udp_fd(instance, 12345, read_handler, on_conn_close_handler);

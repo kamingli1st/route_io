@@ -23,17 +23,18 @@ typedef enum { rio_false, rio_true } rio_bool_t;
 #define rio_add_http_fd rio_add_tcp_fd
 
 typedef enum {
-  rio_READABLE   =   0,
-  rio_AFT_READ_AND_WRITABLE  =   1,
-  rio_PEER_CLOSED    =   2,
-  rio_IDLE = 3,
+  rio_READABLE   =   1,
+  rio_READING = 2,
+  rio_AFT_READ_AND_WRITABLE  =   3,
   rio_DONE_WRITE = 4,
+  rio_PEER_CLOSED = 5,
+  rio_IDLE = 6,
 } rio_state;
 
 typedef struct rio_buf_s {
   unsigned char *start;
   unsigned char *end;
-  size_t total_size;
+  size_t capacity;
 } rio_buf_t;
 
 struct rio_request_s {
@@ -59,7 +60,9 @@ struct rio_request_s {
   rio_on_conn_close_pt on_conn_close_handler;
   unsigned isudp: 1;
   void* ctx_val;
-  //DWORD readable_bytes;
+  WSABUF read_check_buf;
+  int has_more_readable;
+  SIZE_T sz_per_read;
 };
 
 typedef struct {
@@ -174,7 +177,8 @@ extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_p
                           rio_on_conn_close_pt on_conn_close_handler);
 extern void rio_set_no_fork(void);
 extern void rio_set_max_polling_event(int opt);
-extern void rio_set_sz_per_read(int opt);
+extern void rio_set_def_sz_per_read(int opt);
+extern void rio_set_req_sz_per_read(rio_request_t* req, int opt);
 
 /** For HTTP OUTPUT **/
 #define rio_http_xform_header "Content-Type: application/x-www-form-urlencoded"

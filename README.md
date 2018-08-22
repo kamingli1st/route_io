@@ -84,19 +84,34 @@ int main(void) {
 
 ```
 
-## Extra Paramater *size_per_read* on windows os
-```c
-extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
-                          SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
-extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,
-                          SIZE_T size_per_read, rio_on_conn_close_pt on_conn_close_handler);
-```
+## Extra Configuration on route io on run time
+### reconfig the polling events
 
-### reconfig the polling events and size per connection read API
 ```c
 
 extern void rio_set_max_polling_event(int opt);
-extern void rio_set_sz_per_read(int opt);
+
+```
+
+### set a default read size for every new connection, if not set, it will based on built in default size which is 1024
+
+```c
+
+extern void rio_set_def_sz_per_read(int opt);
+
+```
+
+### reset current connection read size for single connection session while reading, by default is based on default size
+
+```c
+extern void rio_set_curr_req_read_sz(rio_request_t* req, int opt);
+
+```
+
+### to tell system not to fork a process to run the IO, it is not recommended as parent process down or corrupted, the program will be exited.
+
+```c
+extern void rio_set_no_fork(void);
 
 ```
 

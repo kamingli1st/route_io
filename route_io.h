@@ -33,7 +33,7 @@ typedef enum {
 typedef struct rio_buf_s {
   unsigned char *start;
   unsigned char *end;
-  size_t total_size;
+  size_t capacity;
 } rio_buf_t;
 
 struct rio_request_s {
@@ -87,7 +87,7 @@ typedef enum { rio_false, rio_true } rio_bool_t;
 typedef struct rio_buf_s {
   unsigned char *start;
   unsigned char *end;
-  size_t total_size;
+  size_t capacity;
 } rio_buf_t;
 
 struct rio_request_s {
@@ -102,6 +102,8 @@ struct rio_request_s {
   rio_read_handler_pt read_handler;
   rio_on_conn_close_pt on_conn_close_handler;
   struct epoll_event *epev;
+  SIZE_T sz_per_read;
+  int force_close; // force close on host side
 };
 
 struct rio_instance_s {
@@ -134,7 +136,7 @@ struct rio_instance_s {
     typedef struct rio_buf_s {
         unsigned char *start;
         unsigned char *end;
-        size_t total_size;
+        size_t capacity;
     } rio_buf_t;
     
     struct rio_request_s {

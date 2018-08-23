@@ -72,6 +72,10 @@ rio_on_recv(rio_request_t *req, rio_state st) {
 
 	if ((buf->capacity- CurrSz) < req->sz_per_read) {
 		NewSize = buf->capacity * 2;
+		while ((NewSize - CurrSz) < req->sz_per_read) {
+			NewSize *= 2;
+		}
+
 		rio_buf_t *newBuf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + (NewSize * sizeof(u_char)));
 		newBuf->capacity = NewSize * sizeof(u_char);
 		newBuf->start = ((u_char*)newBuf) + sizeof(rio_buf_t);
@@ -158,24 +162,22 @@ rio_after_close(rio_request_t *req) {
 static void
 rio_on_udp_iocp(rio_request_t *req, DWORD nbytes) {
 	rio_buf_t * buf = req->in_buff;
-	SIZE_T NewSize;
 	WSABUF udpbuf;
 	DWORD udpflag, rc;
 
 RIO_UDP_MODE_SWITCH_STATE:
 	switch (req->next_state) {
 	case rio_READABLE:
-		if (buf->capacity < req->sz_per_read) {
-			NewSize = req->sz_per_read;
-			rio_buf_t *newBuf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + (NewSize * sizeof(u_char)));
-			newBuf->capacity = NewSize * sizeof(u_char);
-			newBuf->end = newBuf->start = ((u_char*)newBuf) + sizeof(rio_buf_t);
-			RIO_FREE(buf);
-			buf = req->in_buff = newBuf;
+		if (buf->capacity < __RIO_DEF_SZ_PER_READ__) {
+			do {
+				buf->capacity *= 2;
+			} while (buf->capacity < __RIO_DEF_SZ_PER_READ__);
+			req->sz_per_read = __RIO_DEF_SZ_PER_READ__;
 		}
-		udpbuf.len = (ULONG)buf->capacity;
+		udpbuf.len = (ULONG)req->sz_per_read;
 		udpbuf.buf = buf->start;
 		udpflag = 0;
+		req->next_state = rio_WRITABLE;
 		rc = WSARecvFrom(req->listenfd, &udpbuf, 1, (LPDWORD)&nbytes,
 			(LPDWORD)&udpflag, (struct sockaddr*)&req->client_addr,
 			&req->client_addr_len, &req->ovlp, NULL);
@@ -187,7 +189,6 @@ RIO_UDP_MODE_SWITCH_STATE:
 			fprintf(stderr, "WSARecvFrom error:%d, sock:%Id, bytesRead:%Id\r\n", rc, req->listenfd, nbytes);
 #endif
 		}
-		req->next_state = rio_WRITABLE;
 		break;
 	case rio_WRITABLE:
 		req->next_state = rio_IDLE;
@@ -216,7 +217,7 @@ RIO_UDP_MODE_SWITCH_STATE:
 static rio_request_t*
 rio_create_tcp_request_event(SOCKET listenfd, HANDLE iocp_port) {
 
-	const DWORD defSize = __RIO_DEF_SZ_PER_READ__ > RIO_BUFFER_SIZE ? __RIO_DEF_SZ_PER_READ__ : RIO_BUFFER_SIZE;
+	const DWORD defSize = __RIO_DEF_SZ_PER_READ__;
 
 	rio_request_t *req = (rio_request_t*)RIO_MALLOC(sizeof(rio_request_t));
 	req->ovlp.Internal = 0;
@@ -256,7 +257,7 @@ static rio_request_t*
 rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port) {
 	
 	int rc;
-	const DWORD defSize = __RIO_DEF_SZ_PER_READ__ > RIO_BUFFER_SIZE ? __RIO_DEF_SZ_PER_READ__ : RIO_BUFFER_SIZE;
+	const DWORD defSize = __RIO_DEF_SZ_PER_READ__;
 
 	rio_request_t *req = (rio_request_t*)RIO_MALLOC(sizeof(rio_request_t));
 	req->listenfd = listenfd;
@@ -343,15 +344,25 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 
 		if (0 == rc_status) {
 			// An error occurred; reset to a known state.
-			if (ERROR_MORE_DATA != (rc_status = WSAGetLastError())) {
-				if ( (p_req) ) {
-					rio_reset_socket(p_req, instance);
-					continue;
-				}
+			if (ERROR_MORE_DATA == (rc_status = WSAGetLastError())) {
+				fprintf(stderr, "Kindly expand udp packat read size, it does not fit the default read size\n");
 			}
 
-			perror("Error while GETTING QUEUE");
+			RIO_ERROR("Error while GETTING QUEUE");
 			fprintf(stderr, "failed with error code %d\n", WSAGetLastError());
+
+			if ((p_req) && p_req->isudp) {
+				ZeroMemory(&p_req->client_addr, p_req->client_addr_len);
+				p_req->next_state = rio_READABLE;
+				if (!PostQueuedCompletionStatus(instance->iocp, 0, (ULONG_PTR)COMPLETION_KEY_IO, &p_req->ovlp)) {
+					if ((rc_status = WSAGetLastError()) != WSA_IO_PENDING)
+						fprintf(stderr, "PostQueuedCompletionStatus error: %d\r\n", rc_status);
+				}
+			}
+			else {
+				rio_reset_socket(p_req, instance);
+				continue;
+			}
 		}
 		else if (COMPLETION_KEY_IO == CompKey) {
 			if (p_req->isudp) {

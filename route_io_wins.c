@@ -19,11 +19,15 @@
 #define RIO_STRLEN(p) strlen((char*)p)
 #define RIO_ERROR(errmsg) fprintf(stderr, "%s - %d\n", errmsg, GetLastError() )
 #define RIO_FREE(p) free(p);p=NULL
-#define RIO_FREE_REQ_IN_OUT(req) \
+#define RIO_FREE_TCP_REQ_IN_OUT(req) \
 if(req){\
 if(req->in_buff){req->in_buff->end = req->in_buff->start; } \
 if(req->out_buff){RIO_FREE(req->out_buff);req->out_buff=NULL;}\
 rio_set_curr_req_read_sz(req, __RIO_DEF_SZ_PER_READ__);}
+#define RIO_FREE_UDP_REQ_IN_OUT(req) \
+if(req){\
+if(req->in_buff){req->in_buff->end = req->in_buff->start; } \
+if(req->out_buff){RIO_FREE(req->out_buff);req->out_buff=NULL;}}
 
 static int __RIO_MAX_POLLING_EVENT__ = 128;
 static int __RIO_NO_FORK_PROCESS__ = 0; // By default it fork a process
@@ -40,7 +44,8 @@ static void rio_on_recv(rio_request_t*, rio_state);
 static void rio_on_send(rio_request_t *, rio_buf_t *, rio_state);
 static void rio_peer_close(rio_request_t *);
 static void rio_process_and_write(rio_request_t *, DWORD);
-static void rio_clear_buffers(rio_request_t *);
+//static void rio_clear_buffers(rio_request_t *);
+static rio_buf_t* rio_realloc_buf(rio_buf_t *);
 static void rio_after_close(rio_request_t *);
 static void rio_reset_socket(rio_request_t *req, rio_instance_t *instance);
 static rio_request_t* rio_create_tcp_request_event(SOCKET, HANDLE);
@@ -59,7 +64,7 @@ static void
 rio_on_accept(rio_request_t *req) {
 	req->next_state = rio_READABLE;
 	DWORD ReceiveLen; // Do nothing for this value
-	RIO_FREE_REQ_IN_OUT(req);
+	RIO_FREE_TCP_REQ_IN_OUT(req);
 	AcceptEx(req->listenfd, req->sock, req->addr_block, 0, ACCEPT_ADDRESS_LENGTH,
 		ACCEPT_ADDRESS_LENGTH, &ReceiveLen, (LPOVERLAPPED)req);
 }
@@ -75,13 +80,8 @@ rio_on_recv(rio_request_t *req, rio_state st) {
 		while ((NewSize - CurrSz) < req->sz_per_read) {
 			NewSize *= 2;
 		}
-
-		rio_buf_t *newBuf = (rio_buf_t *)RIO_MALLOC(sizeof(rio_buf_t) + (NewSize * sizeof(u_char)));
-		newBuf->capacity = NewSize * sizeof(u_char);
-		newBuf->start = ((u_char*)newBuf) + sizeof(rio_buf_t);
-		newBuf->end = ((u_char*)memcpy(newBuf->start, buf->start, CurrSz)) + CurrSz;
-		RIO_FREE(buf);
-		buf = req->in_buff = newBuf;
+		buf->capacity = NewSize;
+		buf = req->in_buff = rio_realloc_buf(buf);
 	}
 
 	DWORD IocpFlag = 0;
@@ -139,6 +139,22 @@ rio_process_and_write(rio_request_t *req, DWORD n_byte_read) {
 	}
 }
 
+static rio_buf_t*
+rio_realloc_buf(rio_buf_t * buf) {
+	SIZE_T curr_size = rio_buf_size(buf) * sizeof(u_char);
+	rio_buf_t*	new_buf = RIO_MALLOC(sizeof(rio_buf_t) +  (buf->capacity *sizeof(u_char)) );
+	if (new_buf == NULL) {
+		RIO_ERROR("malloc ");
+		return NULL;
+	}
+	new_buf->capacity = buf->capacity * sizeof(u_char);
+	new_buf->start = ((u_char*)new_buf) + sizeof(rio_buf_t);
+	new_buf->end = ((u_char*)memcpy(new_buf->start, buf->start, curr_size)) + curr_size;
+	RIO_FREE(buf);
+	return new_buf;
+}
+
+
 static void
 rio_reset_socket(rio_request_t *req, rio_instance_t *instance) {
 	req->sock = WSASocket(PF_INET, SOCK_STREAM, IPPROTO_TCP, 0, 0, WSA_FLAG_OVERLAPPED);
@@ -155,7 +171,7 @@ rio_reset_socket(rio_request_t *req, rio_instance_t *instance) {
 static void
 rio_after_close(rio_request_t *req) {
 	ZeroMemory(req->addr_block, ACCEPT_ADDRESS_LENGTH * 2);
-	RIO_FREE_REQ_IN_OUT(req);
+	RIO_FREE_TCP_REQ_IN_OUT(req);
 	rio_on_accept(req);
 }
 
@@ -173,6 +189,7 @@ RIO_UDP_MODE_SWITCH_STATE:
 				buf->capacity *= 2;
 			} while (buf->capacity < __RIO_DEF_SZ_PER_READ__);
 			req->sz_per_read = __RIO_DEF_SZ_PER_READ__;
+			buf = req->in_buff = rio_realloc_buf(buf);
 		}
 		udpbuf.len = (ULONG)req->sz_per_read;
 		udpbuf.buf = buf->start;
@@ -205,7 +222,7 @@ RIO_UDP_MODE_SWITCH_STATE:
 		}
 	case rio_DONE_WRITE:
 		req->on_conn_close_handler(req);
-		RIO_FREE_REQ_IN_OUT(req);
+		RIO_FREE_UDP_REQ_IN_OUT(req);
 		req->ctx_val = NULL;
 		req->next_state = rio_READABLE;
 		ZeroMemory(&req->client_addr, req->client_addr_len);

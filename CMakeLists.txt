@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
-project(route_io DESCRIPTION "cmake for Linux build.")
+project(route_io)
 
 set(PROJNAME routeio)
 

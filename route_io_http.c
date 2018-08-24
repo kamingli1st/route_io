@@ -231,11 +231,11 @@ rio_http_getpath(rio_request_t *req, rio_buf_t *buf) {
   if (pbuf) {
     buflen = pbuf->end - pbuf->start;
     if ( (buf->start = (unsigned char*) memchr(pbuf->start, '/', buflen) ) && (buf->end = (unsigned char*) memchr(buf->start, ' ', pbuf->end - buf->start )) ) {
-      buf->total_size = buf->end - buf->start;
+      buf->capacity = buf->end - buf->start;
       return rio_true;
     }
   }
-  buf->total_size = 0;
+  buf->capacity = 0;
   return rio_false;
 }
 
@@ -246,23 +246,23 @@ rio_http_getbody(rio_request_t *req, rio_buf_t *buf) {
     if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*)"\r\n\r\n")) ) {
       buf->start += 4;
       buf->end = pbuf->end;
-      buf->total_size = buf->end - buf->start;
+      buf->capacity = buf->end - buf->start;
       return rio_true;
     } else if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*) "\n\n") ) ) {
       buf->start += 2;
       buf->end = pbuf->end;
-      buf->total_size = buf->end - buf->start;
+      buf->capacity = buf->end - buf->start;
       return rio_true;
     }
   }
-  buf->total_size = 0;
+  buf->capacity = 0;
   return rio_false;
 }
 
 rio_bool_t
 rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
   rio_http_getpath(req, buf);
-  size_t len = buf->total_size, keylen = strlen(key);
+  size_t len = buf->capacity, keylen = strlen(key);
   unsigned char *start = buf->start, *end = buf->end;
   char deli = '?';
 
@@ -278,22 +278,22 @@ rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
             if ( (end = (unsigned char*) memchr(start, (int)deli, len) ) ) {
               buf->start = start;
               buf->end = --end;
-              buf->total_size = end - start;
+              buf->capacity = end - start;
             } else {
               buf->start = start;
-              buf->total_size = buf->end - start;
+              buf->capacity = buf->end - start;
             }
             return rio_true;
           }
           continue;
         }
         buf->start = buf->end = 0;
-        buf->total_size = 0;
+        buf->capacity = 0;
         return rio_false;
       }
     } while ( (start = (unsigned char*) memchr(start, (int)deli, len) ) );
   }
   buf->start = buf->end = 0;
-  buf->total_size = 0;
+  buf->capacity = 0;
   return rio_false;
 }

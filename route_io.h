@@ -102,7 +102,7 @@ struct rio_request_s {
   rio_read_handler_pt read_handler;
   rio_on_conn_close_pt on_conn_close_handler;
   struct epoll_event *epev;
-  SIZE_T sz_per_read;
+  size_t sz_per_read;
   int force_close; // force close on host side
 };
 
@@ -176,7 +176,8 @@ extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_p
                           rio_on_conn_close_pt on_conn_close_handler);
 extern void rio_set_no_fork(void);
 extern void rio_set_max_polling_event(int opt);
-extern void rio_set_sz_per_read(int opt);
+extern void rio_set_def_sz_per_read(int opt);
+extern void rio_set_curr_req_read_sz(rio_request_t *req, int opt);
 
 /** For HTTP OUTPUT **/
 #define rio_http_xform_header "Content-Type: application/x-www-form-urlencoded"

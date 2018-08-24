@@ -27,12 +27,12 @@ void read_handler(rio_request_t *req) {
   rio_http_getpath(req, &path);  
   rio_http_getbody(req, &body);  
   
-  printf("%.*s\n", (int)path.total_size, (char*) path.start );
-  printf("%.*s\n", (int)body.total_size, (char*) body.start );
+  printf("%.*s\n", (int)path.capacity, (char*) path.start );
+  printf("%.*s\n", (int)body.capacity, (char*) body.start );
 
   rio_write_http_status(req, 200);
   rio_write_http_header_2(req, rio_http_textplain_header);
-  rio_write_http_content_2(req, (char*) path.start, path.total_size);
+  rio_write_http_content_2(req, (char*) path.start, path.capacity);
   /** For debug **/
 //   printf("%.*s\n", (int)rio_buf_size(req->out_buff), req->out_buff->start );
 }

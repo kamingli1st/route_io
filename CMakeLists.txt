@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
-project(route_io)
+project(route_io DESCRIPTION "cmake for Linux build.")
 
 set(PROJNAME routeio)
 
@@ -18,8 +18,8 @@ ENDIF(NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
 
 include_directories(/usr/local/include /usr/include)
 
-file(GLOB_RECURSE sources route_io.c route_io_http.c route_io.h)
-file(GLOB_RECURSE example_test route_io.c route_io_http.c route_echoback_example.c route_io.h )
+file(GLOB_RECURSE sources route_io_linux.c route_io_http.c route_io.h)
+file(GLOB_RECURSE example_test route_io_linux.c route_io_http.c route_echoback_example.c route_io.h )
 
 add_executable(route_echoback_handler ${example_test})
 target_link_libraries(route_echoback_handler PUBLIC pthread)
@@ -72,8 +72,8 @@ endif()
 # if(DEFINED RIO_COMPILE_WINDOWS) 
 # MESSAGE(STATUS "Windows Build ...")
 
-# file(GLOB_RECURSE sources route_io.c route_io.h)
-# file(GLOB_RECURSE example_test route_io.c route_io.h route_echoback_example.c)
+# file(GLOB_RECURSE sources route_io_linux.c route_io.h)
+# file(GLOB_RECURSE example_test route_io_linux.c route_io.h route_echoback_example.c)
 
 # # SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -static-libgcc")
 

@@ -320,7 +320,7 @@ rio_run_epoll(rio_instance_t *instance) {
 	do {
 		n = epoll_wait(instance->epfd, ep_events, __RIO_MAX_POLLING_EVENT__, 5000);
 	} while (n == -1 && errno == EINTR);
-	printf("N = %d\n", n);
+
 	if (n == -1) {
 		return -1;
 	}

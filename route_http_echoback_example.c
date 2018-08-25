@@ -18,8 +18,8 @@ void init_instance(void *arg) {
 }
 
 void read_handler(rio_request_t *req) {
-  ssize_t i, curr_size = rio_buf_size(req->in_buff);
-  unsigned char* curr_buf = req->in_buff->start;
+  ssize_t i, curr_size = rio_buf_size(req->inbuf);
+  unsigned char* curr_buf = req->inbuf->start;
 
   rio_buf_t path;
   rio_buf_t body;

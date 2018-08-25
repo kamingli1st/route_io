@@ -34,25 +34,31 @@
 #define RIO_MODIFY_FD(instance, fd, ee) epoll_ctl(instance->epfd, EPOLL_CTL_MOD, fd, ee)
 #define RIO_DEL_FD(instance, fd, ee) epoll_ctl(instance->epfd, EPOLL_CTL_DEL, fd, ee)
 
-#define RIO_TCP_CHECK_TRY(n, nextstep, rt) \
-if(n<0){\
-if (errno == EWOULDBLOCK || errno == EINTR) {\
-nextstep;\
-}else if (errno != EAGAIN){\
-fprintf(stderr, "error while process socket read/write: %s\n",strerror(errno));\
-rt;\
-}else fprintf(stderr, "tcp:Error: %s\n", strerror(errno) );\
-}else if(n == 0) { \
-rt;}
+#if EAGAIN == EWOULDBLOCK
+#define RIO_EAGAIN_EBLOCK EAGAIN
+#else
+#define RIO_EAGAIN_EBLOCK EAGAIN: case EWOULDBLOCK
+#endif
+
+// This only use when it n <= 0
+#define RIO_SOCKET_CHECK_TRY(n, goto_retry, goto_close) \
+if(n==0){ \
+goto_close;\
+}else{\
+switch(errno){\
+case RIO_EAGAIN_EBLOCK:\
+case EINTR:\
+goto_retry;\
+default:\
+fprintf(stderr, "socket:Error: %s\n", strerror(errno) );\
+goto_close; \
+}}
 
 #define RIO_FREE_REQ_ALL(req) \
 if(req){\
-if (req->in_buff) { \
-RIO_FREE(req->in_buff); \
+if (req->inbuf) { \
+RIO_FREE(req->inbuf); \
 } \
-if (req->out_buff) { \
-RIO_FREE(req->out_buff); \
-}\
 RIO_FREE(req);}
 
 typedef void (*rio_signal_handler_pt)(int);
@@ -74,10 +80,20 @@ static int rio_run_epoll(rio_instance_t *instance);
 static void rio_def_on_conn_close_handler(rio_request_t *req) {
 	/*Do nothing*/
 }
+static short rio_get_port_from_socket(int sock) {
+	struct sockaddr_in sin;
+	socklen_t len = sizeof(sin);
+	if (getsockname(sock, (struct sockaddr *)&sin, &len) == -1) {
+		RIO_ERROR("getsockname");
+	} else {
+		return ntohs(sin.sin_port);
+	}
+	return -1;
+}
 
 void *rio_read_udp_handler_spawn(void *req_);
 void *rio_read_tcp_handler_spawn(void *req_);
-void *rio_tcp_connection_close_spwan(void *req_);
+// void *rio_tcp_connection_close_spwan(void *req_);
 
 void
 rio_set_no_fork() {
@@ -101,79 +117,24 @@ rio_set_curr_req_read_sz(rio_request_t *req, int opt) {
 
 void
 rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
-	rio_buf_t *buf;
-	size_t outsz = RIO_STRLEN(output), curr_size, new_size;
-	if (outsz == 0) {
-		return ;
-	}
-	if (req->out_buff == NULL) {
-		buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
-		if (!buf) {
-			RIO_ERROR("malloc");
-			return;
-		}
-		buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
-		buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
-		buf->capacity = outsz;
-		req->out_buff = buf;
-	} else {
-		curr_size = rio_buf_size(req->out_buff);
-		if ( (curr_size + outsz) > req->out_buff->capacity ) {
-			new_size = (curr_size + outsz) * 2;
-			buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + new_size );
-			if (!buf) {
-				RIO_ERROR("malloc");
-				return;
-			}
-			buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
-			buf->end = ((u_char*) memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
-			buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
-			buf->capacity = new_size;
-			RIO_FREE(req->out_buff);
-			req->out_buff = buf;
-		} else {
-			buf = req->out_buff;
-			buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
+	int retbytes;
+	size_t outsz;
+	if (output) {
+		outsz = RIO_STRLEN(output);
+		while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
+		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
+			RIO_SOCKET_CHECK_TRY(retbytes, continue, printf("%s\n", "peer closed while sending"); break);
 		}
 	}
 }
 
 void
 rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t outsz) {
-	rio_buf_t *buf;
-	size_t curr_size, new_size;
-	if (outsz == 0) {
-		return ;
-	}
-
-	if (req->out_buff == NULL) {
-		buf = (rio_buf_t*) RIO_MALLOC(sizeof(rio_buf_t) + outsz);
-		if (!buf) {
-			RIO_ERROR("malloc");
-			return;
-		}
-		buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
-		buf->end = ((u_char *)memcpy( buf->start, output, outsz)) + outsz ;
-		buf->capacity = outsz;
-		req->out_buff = buf;
-	} else {
-		curr_size = rio_buf_size(req->out_buff);
-		if ( (curr_size + outsz) > req->out_buff->capacity ) {
-			new_size = (curr_size + outsz) * 2;
-			buf = (rio_buf_t*)  RIO_MALLOC(sizeof(rio_buf_t) + new_size);
-			if (!buf) {
-				RIO_ERROR("malloc");
-				return;
-			}
-			buf->start = ((u_char*) buf) + sizeof(rio_buf_t);
-			buf->end = ((u_char*) memcpy(buf->start, req->out_buff->start, curr_size)) + curr_size;
-			buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
-			buf->capacity = new_size;
-			RIO_FREE(req->out_buff);
-			req->out_buff = buf;
-		} else {
-			buf = req->out_buff;
-			buf->end = ((u_char*) memcpy(buf->end, output, outsz)) + outsz;
+	int retbytes;
+	if (output) {
+		while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
+		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
+			RIO_SOCKET_CHECK_TRY(retbytes, continue, printf("%s\n", "peer closed while sending"); break);
 		}
 	}
 }
@@ -195,12 +156,11 @@ rio_create_fd(u_short port, short af_family, int socket_type, int protocol, int 
 	serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	serveraddr.sin_port = htons(port);
 
-	if (!isudp) {
-		if (setnonblocking(sockfd) == -1 /*|| setlinger(sockfd, 1, 3) == -1 || settimeout(sockfd, 1000, 1000) == -1 */) {
-			RIO_ERROR("Error while creating fd");
-			return -1;
-		}
+	if (setnonblocking(sockfd) == -1 /*|| setlinger(sockfd, 1, 3) == -1 || settimeout(sockfd, 1000, 1000) == -1 */) {
+		RIO_ERROR("Error while creating fd");
+		return -1;
 	}
+
 	if (bind(sockfd, (struct sockaddr *) &serveraddr, sizeof serveraddr) == -1)
 		return -1;
 
@@ -216,62 +176,63 @@ rio_create_fd(u_short port, short af_family, int socket_type, int protocol, int 
 void *
 rio_read_udp_handler_spawn(void *_req) {
 	rio_request_t *req = (rio_request_t*)_req;
-	req->read_handler(req);
-
-	if ( req->out_buff ) {
-		while (sendto(req->sockfd, req->out_buff->start, req->out_buff->end - req->out_buff->start, 0,
-		              (struct sockaddr *) &req->client_addr, req->client_addr_len) == -1 && errno == EINTR) /*Loop till success or error*/;
-		req->on_conn_close_handler(req);
-		RIO_FREE(req->out_buff);
-		RIO_FREE(req->in_buff);
-		RIO_FREE(req);
-	} else {
-		req->on_conn_close_handler(req);
-		RIO_FREE(req->in_buff);
-		RIO_FREE(req);
+	int retbytes, fd = req->sockfd;
+	rio_buf_t *inbuf = req->inbuf;
+	size_t sz_per_read = req->sz_per_read;
+	while ( ( retbytes = recvfrom(fd, inbuf->start, sz_per_read, 0,
+	                              (struct sockaddr *) &req->client_addr, &req->client_addr_len) ) <= 0 ) {
+		RIO_SOCKET_CHECK_TRY(retbytes, continue, goto EXIT_REQUEST);
 	}
-	pthread_exit(NULL);
-}
-
-void *
-rio_tcp_connection_close_spwan(void *req_) {
-	rio_request_t *req = (rio_request_t*)req_;
-	req->on_conn_close_handler(req);
-	rio_do_close(req->sockfd);
+	inbuf->end = inbuf->start + retbytes;
+	req->inbuf = inbuf;
+	req->read_handler(req);
+EXIT_REQUEST:
 	RIO_FREE_REQ_ALL(req);
 	pthread_exit(NULL);
 }
 
+// void *
+// rio_tcp_connection_close_spwan(void *req_) {
+// 	rio_request_t *req = (rio_request_t*)req_;
+// 	req->on_conn_close_handler(req);
+// 	rio_do_close(req->sockfd);
+// 	RIO_FREE_REQ_ALL(req);
+// 	pthread_exit(NULL);
+// }
+
 void *
 rio_read_tcp_handler_spawn(void *req_) {
+	int retbytes;
 	rio_request_t *req = (rio_request_t*)req_;
-	rio_instance_t *instance = req->instance;
+	rio_buf_t *inbuf = req->inbuf;
+	size_t curr_size, sz_per_read = req->sz_per_read, new_size;
 
-	req->read_handler(req);
-	struct epoll_event ee;
-	ee.data.ptr = (void*) req;
+	for (;;) {
+		while ((retbytes = recv( req->sockfd , inbuf->end, sz_per_read, 0)) <= 0 ) {
+			RIO_SOCKET_CHECK_TRY(retbytes, continue, goto EXIT_REQUEST);
+		}
+		inbuf->end += retbytes;
+		req->read_handler(req);
 
-	if ( req->out_buff && (req->out_buff->end - req->out_buff->start) ) {
-		ee.events = EPOLLOUT | EPOLLONESHOT | EPOLLRDHUP | EPOLLERR;
-	} else if (req->force_close) {
-		rio_write_output_buffer(req, (unsigned char*) "0");
-		ee.events = EPOLLOUT | EPOLLONESHOT | EPOLLRDHUP | EPOLLERR;
-	} else {
-		ee.events = EPOLLIN | EPOLLONESHOT | EPOLLRDHUP | EPOLLERR;
+		if (req->force_close) {
+			goto EXIT_REQUEST;
+		} else if (inbuf) {
+			curr_size = rio_buf_size(inbuf);
+			// It is dynamic change sz per read
+			sz_per_read = req->sz_per_read;
+			if ((inbuf->capacity - curr_size) < sz_per_read) {
+				new_size = inbuf->capacity * 2;
+				while ((new_size - curr_size) < sz_per_read) {
+					new_size *= 2;
+				}
+				inbuf->capacity = new_size;
+				inbuf = req->inbuf = rio_realloc_buf(inbuf);
+			}
+		}
 	}
-
-	if (RIO_MODIFY_FD(instance, req->sockfd, &ee )) {
-		RIO_ERROR("error modify_to_epoll_fd");
-		goto ERR_EXIT_REQUEST;
-	}
-
-	pthread_exit(NULL);
-
 	/** Exception Case, it might not be happened ***/
-ERR_EXIT_REQUEST:
+EXIT_REQUEST:
 	if (req) {
-		RIO_DEL_FD(instance, req->sockfd, &ee );
-		instance->nevents--;
 		req->on_conn_close_handler(req);
 		rio_do_close(req->sockfd);
 		RIO_FREE_REQ_ALL(req);
@@ -312,8 +273,8 @@ rio_run_epoll(rio_instance_t *instance) {
 	struct epoll_event *epev;
 	rio_request_t *main_req, *sub_req;
 	int i, n, evstate,
-	    fd, nbytes, bytes_send;
-	size_t curr_size, new_size, sz_per_read;
+	    fd;
+	size_t sz_per_read;
 	rio_buf_t *buf;
 
 	memset(ep_events, 0, instance->ep_events_sz);
@@ -325,13 +286,14 @@ rio_run_epoll(rio_instance_t *instance) {
 		return -1;
 	}
 
+	// printf("%d\n", n);
+
 	for (i = 0; i < n; i++) {
 		epev = &ep_events[i];
 		evstate = epev->events;
 		main_req = epev->data.ptr;
 
 		if ( evstate & EPOLLIN  ) {
-
 			if (main_req->isudp) {
 				fd = main_req->sockfd;
 				sz_per_read = __RIO_DEF_SZ_PER_READ__;
@@ -347,30 +309,18 @@ rio_run_epoll(rio_instance_t *instance) {
 				memcpy(sub_req, main_req, sizeof(rio_request_t));
 				sub_req->sockfd = fd;//fcntl(fd, F_DUPFD, 0);
 				sub_req->sz_per_read = sz_per_read;
-
-				while ( ( nbytes = recvfrom(fd, buf->start, sz_per_read, 0,
-				                            (struct sockaddr *) &sub_req->client_addr, &sub_req->client_addr_len) ) == -1 && errno == EINTR) /*Loop till success or error*/;
-
-				if (nbytes == 0) {
-					sub_req->on_conn_close_handler(sub_req);
-					if (buf) {
-						RIO_FREE(buf);
-					}
-					RIO_FREE(sub_req);
-				}
-				buf->end = buf->start + nbytes;
-				sub_req->in_buff = buf;
+				sub_req->inbuf = buf;
 				pthread_t t;
 				if (pthread_create(&t, NULL, rio_read_udp_handler_spawn, sub_req)) {
-					RIO_FREE(sub_req->in_buff);
+					RIO_FREE(sub_req->inbuf);
 					RIO_FREE(sub_req);
 					RIO_ERROR("Error creating thread\n");
 					return -1;
 				}
 				pthread_detach(t);
 			} else {
-				// if in_buff is null, means is master request, accept new connection
-				if ( main_req->in_buff == NULL) {
+				// if inbuf is null, means is master request, accept new connection
+				if ( main_req->inbuf == NULL) {
 					sz_per_read = __RIO_DEF_SZ_PER_READ__;
 					if ((fd = accept( main_req->sockfd, (struct sockaddr *)&main_req->client_addr,
 					                  &main_req->client_addr_len)) < 0) {
@@ -390,7 +340,7 @@ rio_run_epoll(rio_instance_t *instance) {
 						memcpy(sub_req, main_req, sizeof(rio_request_t));
 						sub_req->sockfd = fd;
 						sub_req->sz_per_read = sz_per_read;
-						sub_req->in_buff = buf = RIO_MALLOC(sizeof(rio_buf_t) + sz_per_read );
+						sub_req->inbuf = buf = RIO_MALLOC(sizeof(rio_buf_t) + sz_per_read );
 						if (buf == NULL) {
 							RIO_ERROR("No Enough memory allocated");
 							return ENOMEM;
@@ -402,81 +352,36 @@ rio_run_epoll(rio_instance_t *instance) {
 							RIO_ERROR("error add_to_epoll_fd");
 							continue;
 						}
-						instance->nevents += 1;
+						instance->nevents++;
 					} else {
 						fprintf(stderr, "%s\n", "Route has reached max events pool");
 					}
 
 				} else {
-					buf = main_req->in_buff;
-					curr_size = rio_buf_size(buf);
-					sz_per_read = main_req->sz_per_read;
-					if ((buf->capacity - curr_size) < sz_per_read) {
-						new_size = buf->capacity * 2;
-						while ((new_size - curr_size) < sz_per_read) {
-							new_size *= 2;
-						}
-						buf->capacity = new_size;
-						buf = main_req->in_buff = rio_realloc_buf(buf);
-					}
-
-					while ((nbytes = recv( main_req->sockfd , buf->end, sz_per_read, 0)) <= 0 ) {
-						RIO_TCP_CHECK_TRY(nbytes, continue, goto RIO_DEL_AND_FREE_EVENT);
-					}
-					buf->end += nbytes;
 					pthread_t t;
 					if (pthread_create(&t, NULL, rio_read_tcp_handler_spawn, main_req)) {
 						RIO_ERROR("Error creating thread\n");
 						goto RIO_DEL_AND_FREE_EVENT;
 					}
 					pthread_detach(t);
+
+					/***remove event from EPOLL ***/
+					if (RIO_DEL_FD(instance, main_req->sockfd, epev )) {
+						RIO_ERROR("error delete_to_epoll_fd");
+					}
+					instance->nevents--;
 					continue;
 				}
 			}
-		} else if ( evstate & EPOLLOUT ) {
-			if (!main_req->isudp) {
-				if ( (buf = main_req->out_buff) ) {
-					bytes_send = (int) rio_buf_size(buf);
-					while ( (nbytes = send(main_req->sockfd, buf->start, bytes_send, 0)) <= 0) {
-						RIO_TCP_CHECK_TRY(nbytes, continue, break);
-					}
-
-					if (main_req->force_close) {
-						if (RIO_DEL_FD(instance, main_req->sockfd, epev )) {
-							RIO_ERROR("error delete_to_epoll_fd");
-						}
-						instance->nevents--;
-						pthread_t t;
-						if (pthread_create(&t, NULL, rio_tcp_connection_close_spwan, main_req)) {
-							RIO_ERROR("Error creating thread\n");
-							goto RIO_DEL_AND_FREE_EVENT;
-						}
-						pthread_detach(t);
-					} else if (buf) {
-						RIO_FREE(buf);
-						main_req->out_buff = NULL;
-						struct epoll_event ee = { .data.ptr = (void*) main_req, .events = EPOLLIN | EPOLLONESHOT | EPOLLRDHUP | EPOLLERR };
-						if (RIO_MODIFY_FD(instance, main_req->sockfd, &ee )) {
-							RIO_ERROR("error modify_to_epoll_fd");
-						}
-					}
-				} else {
-					/** Error No buffer to write but state is ready to write. **/
-					goto RIO_DEL_AND_FREE_EVENT;
-				}
+		} else if (evstate & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
+			if (main_req->isudp) {
+				fprintf(stderr, "Error on udp port %d\n", rio_get_port_from_socket(main_req->sockfd));
+			} else if (main_req->inbuf == NULL) { // only show the tcp listening port
+				fprintf(stderr, "Error on tcp port %d\n", rio_get_port_from_socket(main_req->sockfd));
 			}
+			goto RIO_DEL_AND_FREE_EVENT;
 		} else {
-			printf("%s\n", "PEER CLOSING.....................");
-			if (RIO_DEL_FD(instance, main_req->sockfd, epev )) {
-				RIO_ERROR("error delete_to_epoll_fd");
-			}
-			instance->nevents--;
-			pthread_t t;
-			if (pthread_create(&t, NULL, rio_tcp_connection_close_spwan, main_req)) {
-				RIO_ERROR("Error creating thread\n");
-				goto RIO_DEL_AND_FREE_EVENT;
-			}
-			pthread_detach(t);
+			// Keep polling
 		}
 
 		continue;
@@ -691,12 +596,10 @@ rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 	p_req->force_close = 0;
 	p_req->sz_per_read = defSize;
 	p_req->sockfd = fd;//fcntl(fd, F_DUPFD, 0);
-	p_req->instance = instance;
 
 	/**Master FD has no request needed**/
-	p_req->in_buff = NULL;
+	p_req->inbuf = NULL;
 	p_req->ctx_val = NULL;
-	p_req->out_buff = NULL;
 	p_req->client_addr_len = sizeof(p_req->client_addr);
 	bzero((char *) &p_req->client_addr, sizeof(p_req->client_addr));
 
@@ -740,12 +643,10 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 	p_req->force_close = 0;
 	p_req->sz_per_read = defSize;
 	p_req->sockfd = fd;
-	p_req->instance = instance;
 
 	/**Master FD has no request needed**/
-	p_req->in_buff = NULL;
+	p_req->inbuf = NULL;
 	p_req->ctx_val = NULL;
-	p_req->out_buff = NULL;
 	p_req->client_addr_len = sizeof(p_req->client_addr);
 	bzero((char *) &p_req->client_addr, sizeof(p_req->client_addr));
 

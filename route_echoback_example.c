@@ -15,10 +15,10 @@ void init_instance(void *arg) {
 }
 
 void read_handler(rio_request_t *req) {
-	int nbytes = rio_buf_size(req->in_buff);
+	int nbytes = rio_buf_size(req->inbuf);
 	fprintf(stderr, "Readed bytes is %d\n", nbytes);
 
-	rio_write_output_buffer_l(req, req->in_buff->start, nbytes);
+	rio_write_output_buffer_l(req, req->inbuf->start, nbytes);
 	rio_write_output_buffer(req, (unsigned char*) "\n");
 	// req->force_close = 1;
 

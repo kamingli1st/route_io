@@ -93,7 +93,6 @@ static short rio_get_port_from_socket(int sock) {
 
 void *rio_read_udp_handler_spawn(void *req_);
 void *rio_read_tcp_handler_spawn(void *req_);
-// void *rio_tcp_connection_close_spwan(void *req_);
 
 void
 rio_set_no_fork() {
@@ -190,15 +189,6 @@ EXIT_REQUEST:
 	RIO_FREE_REQ_ALL(req);
 	pthread_exit(NULL);
 }
-
-// void *
-// rio_tcp_connection_close_spwan(void *req_) {
-// 	rio_request_t *req = (rio_request_t*)req_;
-// 	req->on_conn_close_handler(req);
-// 	rio_do_close(req->sockfd);
-// 	RIO_FREE_REQ_ALL(req);
-// 	pthread_exit(NULL);
-// }
 
 void *
 rio_read_tcp_handler_spawn(void *req_) {
@@ -358,24 +348,26 @@ rio_run_epoll(rio_instance_t *instance) {
 					}
 
 				} else {
-					pthread_t t;
-					if (pthread_create(&t, NULL, rio_read_tcp_handler_spawn, main_req)) {
-						RIO_ERROR("Error creating thread\n");
-						goto RIO_DEL_AND_FREE_EVENT;
-					}
-					pthread_detach(t);
-
 					/***remove event from EPOLL ***/
 					if (RIO_DEL_FD(instance, main_req->sockfd, epev )) {
 						RIO_ERROR("error delete_to_epoll_fd");
 					}
 					instance->nevents--;
+					pthread_t t;
+					if (pthread_create(&t, NULL, rio_read_tcp_handler_spawn, main_req)) {
+						RIO_ERROR("Error creating thread\n");
+						rio_do_close(main_req->sockfd);
+						RIO_FREE_REQ_ALL(main_req);
+					}
+					pthread_detach(t);
+
 					continue;
 				}
 			}
 		} else if (evstate & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
 			if (main_req->isudp) {
-				fprintf(stderr, "Error on udp port %d\n", rio_get_port_from_socket(main_req->sockfd));
+				fprintf(stderr, "Error/closed on udp port %d\n", rio_get_port_from_socket(main_req->sockfd));
+				main_req->on_conn_close_handler(main_req);
 			} else if (main_req->inbuf == NULL) { // only show the tcp listening port
 				fprintf(stderr, "Error on tcp port %d\n", rio_get_port_from_socket(main_req->sockfd));
 			}

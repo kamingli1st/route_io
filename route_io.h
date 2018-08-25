@@ -84,6 +84,12 @@ typedef enum { rio_false, rio_true } rio_bool_t;
 #define rio_buf_size(b) (size_t) (b->end - b->start)
 #define rio_add_http_fd rio_add_tcp_fd
 
+typedef enum {
+  rio_SUCCESS   =   0,
+  rio_SOCK_TIMEOUT   =   1,
+  rio_ERROR  =   -1,
+} rio_state;
+
 typedef struct rio_buf_s {
   unsigned char *start;
   unsigned char *end;
@@ -164,8 +170,8 @@ struct rio_instance_s {
 
 #endif
 
-extern void rio_write_output_buffer(rio_request_t *req, unsigned char* output);
-extern void rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len);
+extern rio_state rio_write_output_buffer(rio_request_t *req, unsigned char* output);
+extern rio_state rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len);
 extern rio_instance_t* rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg );
 extern int rio_start(rio_instance_t *instance);
 extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler,
@@ -175,6 +181,7 @@ extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_p
 extern void rio_set_no_fork(void);
 extern void rio_set_max_polling_event(int opt);
 extern void rio_set_def_sz_per_read(int opt);
+extern void rio_set_rw_timeout(int read_time_ms, int write_time_ms);
 extern void rio_set_curr_req_read_sz(rio_request_t *req, int opt);
 
 /** For HTTP OUTPUT **/

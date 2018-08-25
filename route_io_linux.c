@@ -66,11 +66,14 @@ typedef void (*rio_signal_handler_pt)(int);
 static int __RIO_MAX_POLLING_EVENT__ = 128;
 static int __RIO_NO_FORK_PROCESS__ = 0; // By default it fork a process
 static int __RIO_DEF_SZ_PER_READ__ = RIO_BUFFER_SIZE; // By default size, adjustable
+static int __RIO_READ_TIMEOUT_MS__ = 0; // By default size, adjustable
+static int __RIO_WRITE_TIMEOUT_MS__ = 0; // By default size, adjustable
 static struct sigaction sa;
 static int  has_init_signal = 0;
 static int setnonblocking(int fd);
+static int set_read_timeout(int fd, int read_timeout_ms);
+static int set_write_timeout(int fd, int write_timeout_ms);
 /*** temporary disable for unused warning ***/
-// static int settimeout(int fd, int recv_timeout_ms, int send_timeout_ms);
 // static int setlinger(int sockfd, int onoff, int timeout_sec);
 static int rio_do_close(int fd);
 static rio_buf_t* rio_realloc_buf(rio_buf_t *);
@@ -110,11 +113,17 @@ rio_set_def_sz_per_read(int opt) {
 }
 
 void
+rio_set_rw_timeout(int read_time_ms, int write_time_ms) {
+	__RIO_READ_TIMEOUT_MS__ = read_time_ms;
+	__RIO_WRITE_TIMEOUT_MS__ = write_time_ms;
+}
+
+void
 rio_set_curr_req_read_sz(rio_request_t *req, int opt) {
 	req->sz_per_read = opt;
 }
 
-void
+rio_state
 rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
 	int retbytes;
 	size_t outsz;
@@ -122,20 +131,22 @@ rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
 		outsz = RIO_STRLEN(output);
 		while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
 		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
-			RIO_SOCKET_CHECK_TRY(retbytes, continue, printf("%s\n", "peer closed while sending"); break);
+			RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); return rio_SOCK_TIMEOUT, printf("%s\n", "peer closed while sending"); return rio_ERROR);
 		}
 	}
+	return rio_SUCCESS;
 }
 
-void
+rio_state
 rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t outsz) {
 	int retbytes;
 	if (output) {
 		while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
 		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
-			RIO_SOCKET_CHECK_TRY(retbytes, continue, printf("%s\n", "peer closed while sending"); break);
+			RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); return rio_SOCK_TIMEOUT, printf("%s\n", "peer closed while sending"); return rio_ERROR);
 		}
 	}
+	return rio_SUCCESS;
 }
 
 static int
@@ -155,7 +166,17 @@ rio_create_fd(u_short port, short af_family, int socket_type, int protocol, int 
 	serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	serveraddr.sin_port = htons(port);
 
-	if (setnonblocking(sockfd) == -1 /*|| setlinger(sockfd, 1, 3) == -1 || settimeout(sockfd, 1000, 1000) == -1 */) {
+	if (setnonblocking(sockfd) == -1 /*|| setlinger(sockfd, 1, 3) == -1 */) {
+		RIO_ERROR("Error while creating fd");
+		return -1;
+	}
+
+	if (__RIO_READ_TIMEOUT_MS__ && set_read_timeout(sockfd, __RIO_READ_TIMEOUT_MS__) == -1) {
+		RIO_ERROR("Error while creating fd");
+		return -1;
+	}
+
+	if (__RIO_WRITE_TIMEOUT_MS__ && set_write_timeout(sockfd, __RIO_WRITE_TIMEOUT_MS__) == -1) {
 		RIO_ERROR("Error while creating fd");
 		return -1;
 	}
@@ -180,10 +201,11 @@ rio_read_udp_handler_spawn(void *_req) {
 	size_t sz_per_read = req->sz_per_read;
 	while ( ( retbytes = recvfrom(fd, inbuf->start, sz_per_read, 0,
 	                              (struct sockaddr *) &req->client_addr, &req->client_addr_len) ) <= 0 ) {
-		RIO_SOCKET_CHECK_TRY(retbytes, continue, goto EXIT_REQUEST);
+		RIO_SOCKET_CHECK_TRY(retbytes, goto READ_HANDLER, goto EXIT_REQUEST);
 	}
 	inbuf->end = inbuf->start + retbytes;
 	req->inbuf = inbuf;
+READ_HANDLER:
 	req->read_handler(req);
 EXIT_REQUEST:
 	RIO_FREE_REQ_ALL(req);
@@ -199,9 +221,10 @@ rio_read_tcp_handler_spawn(void *req_) {
 
 	for (;;) {
 		while ((retbytes = recv( req->sockfd , inbuf->end, sz_per_read, 0)) <= 0 ) {
-			RIO_SOCKET_CHECK_TRY(retbytes, continue, goto EXIT_REQUEST);
+			RIO_SOCKET_CHECK_TRY(retbytes, goto READ_HANDLER, goto EXIT_REQUEST);
 		}
 		inbuf->end += retbytes;
+READ_HANDLER:
 		req->read_handler(req);
 
 		if (req->force_close) {
@@ -464,21 +487,22 @@ rio_create_routing_instance(rio_init_handler_pt init_handler, void* arg) {
 
 static int
 setnonblocking(int fd) {
-#if defined _WIN32 || _WIN64
-	unsigned long nonblock = 1;
-	return (ioctlsocket(fd, FIONBIO, &nonblock) == 0) ? true : false;
-#else
-	int flags = fcntl(fd, F_GETFL, 0);
-	if (flags == -1) {
-		RIO_ERROR("error while configure fd non blocking");
-		return -1;
-	}
-	flags = (flags | O_NONBLOCK);
-	if (fcntl(fd, F_SETFL, flags) != 0) {
-		RIO_ERROR("error while configure fd non blocking");
-		return -1;
-	}
-#endif
+	// Non blocking is not needed as it is multhreading
+	/*#if defined _WIN32 || _WIN64
+		unsigned long nonblock = 1;
+		return (ioctlsocket(fd, FIONBIO, &nonblock) == 0) ? true : false;
+	#else
+		int flags = fcntl(fd, F_GETFL, 0);
+		if (flags == -1) {
+			RIO_ERROR("error while configure fd non blocking");
+			return -1;
+		}
+		flags = (flags | O_NONBLOCK);
+		if (fcntl(fd, F_SETFL, flags) != 0) {
+			RIO_ERROR("error while configure fd non blocking");
+			return -1;
+		}
+	#endif*/
 	return 0;
 }
 
@@ -493,30 +517,34 @@ setnonblocking(int fd) {
 //   };
 // }
 
-// static int
-// settimeout(int fd, int recv_timeout_ms, int send_timeout_ms) {
-// 	struct timeval send_tmout_val;
-// 	struct timeval recv_tmout_val;
+static int
+set_read_timeout(int fd, int recv_timeout_ms) {
+	struct timeval recv_tmout_val;
+	recv_tmout_val.tv_sec = (recv_timeout_ms >= 1000) ?  recv_timeout_ms / 1000 : 0; // Default 1 sec time out
+	recv_tmout_val.tv_usec = (recv_timeout_ms % 1000) * 1000 ;
+	if (setsockopt (fd, SOL_SOCKET, SO_RCVTIMEO, &recv_tmout_val,
+	                sizeof(recv_tmout_val)) < 0) {
+		RIO_ERROR("setsockopt recv_tmout_val failed\n");
+		return -1;
+	}
 
+	return 0;
+}
 
-// 	recv_tmout_val.tv_sec = (recv_timeout_ms >= 1000) ?  recv_timeout_ms / 1000 : 0; // Default 1 sec time out
-// 	recv_tmout_val.tv_usec = (recv_timeout_ms % 1000) * 1000 ;
-// 	if (setsockopt (fd, SOL_SOCKET, SO_RCVTIMEO, &recv_tmout_val,
-// 	                sizeof(recv_tmout_val)) < 0) {
-// 		RIO_ERROR("setsockopt recv_tmout_val failed\n");
-// 		return -1;
-// 	}
+static int
+set_write_timeout(int fd, int write_timeout_ms) {
+	struct timeval send_tmout_val;
 
-// 	send_tmout_val.tv_sec = (send_timeout_ms >= 1000) ? send_timeout_ms / 1000 : 0; // Default 1 sec time out
-// 	send_tmout_val.tv_usec = (send_timeout_ms % 1000) * 1000 ;
-// 	if (setsockopt (fd, SOL_SOCKET, SO_SNDTIMEO, &send_tmout_val,
-// 	                sizeof(send_tmout_val)) < 0) {
-// 		RIO_ERROR("setsockopt send_tmout_val failed\n");
-// 		return -1;
-// 	}
+	send_tmout_val.tv_sec = (write_timeout_ms >= 1000) ? write_timeout_ms / 1000 : 0; // Default 1 sec time out
+	send_tmout_val.tv_usec = (write_timeout_ms % 1000) * 1000 ;
+	if (setsockopt (fd, SOL_SOCKET, SO_SNDTIMEO, &send_tmout_val,
+	                sizeof(send_tmout_val)) < 0) {
+		RIO_ERROR("setsockopt send_tmout_val failed\n");
+		return -1;
+	}
 
-// 	return 0;
-// }
+	return 0;
+}
 
 static void
 rio_add_signal_handler(rio_signal_handler_pt signal_handler) {

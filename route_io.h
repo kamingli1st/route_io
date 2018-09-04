@@ -9,6 +9,7 @@ extern "C" {
 #include <winsock2.h>
 #include <mswsock.h>
 #include <shlwapi.h>
+#include "at_thpool.h"
 
 #pragma comment(lib,"ws2_32")   // Standard socket API.
 #pragma comment(lib,"mswsock")  // AcceptEx, TransmitFile, etc,.
@@ -65,6 +66,7 @@ typedef struct {
   HANDLE iocp;
   rio_init_handler_pt init_handler;
   void* init_arg;
+  at_thpool_t *thpool;
 } rio_instance_t;
 
 #elif !defined(__APPLE__) && !defined(_WIN32) && !defined(_WIN64)/*Linux*/
@@ -166,7 +168,7 @@ struct rio_instance_s {
 extern void rio_write_output_buffer(rio_request_t *req, unsigned char* output);
 extern void rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len);
 extern rio_instance_t* rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg );
-extern int rio_start(rio_instance_t *instance);
+extern int rio_start(rio_instance_t *instance, unsigned int n_concurrent_threads);
 extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler,
                           rio_on_conn_close_pt on_conn_close_handler);
 extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,

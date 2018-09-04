@@ -43,7 +43,8 @@ static void rio_on_peek(rio_request_t *);
 static void rio_on_recv(rio_request_t*, rio_state);
 static void rio_on_send(rio_request_t *, rio_buf_t *, rio_state);
 static void rio_peer_close(rio_request_t *);
-static void rio_process_and_write(rio_request_t *, DWORD);
+static void rio_process_and_write(rio_request_t *, DWORD, rio_instance_t*);
+static void rio_on_udp_iocp(rio_request_t *, DWORD, rio_instance_t *);
 //static void rio_clear_buffers(rio_request_t *);
 static rio_buf_t* rio_realloc_buf(rio_buf_t *);
 static void rio_after_close(rio_request_t *);
@@ -57,8 +58,8 @@ static void rio_def_on_conn_close_handler(rio_request_t *req) {
 }
 
 static HANDLE master_shutdown_ev = 0;
-unsigned __stdcall rio_udp_request_thread(void *);
-unsigned __stdcall rio_tcp_request_thread(void *);
+void  rio_udp_request_thread(void *);
+void  rio_tcp_request_thread(void *);
 
 static void
 rio_on_accept(rio_request_t *req) {
@@ -123,19 +124,16 @@ rio_peer_close(rio_request_t *req) {
 }
 
 static void
-rio_process_and_write(rio_request_t *req, DWORD n_byte_read) {
+rio_process_and_write(rio_request_t *req, DWORD n_byte_read, rio_instance_t *instance) {
 	if (rio_is_peer_closed(n_byte_read)) {
 		rio_peer_close(req);
 	}
 	else {
 		req->in_buff->end = req->in_buff->end + n_byte_read;
-		unsigned tid;
-		HANDLE thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_tcp_request_thread, req, 0, &tid);
-		if (thread_hdl == 0) {
-			fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
+		if (at_thpool_newtask(instance->thpool, rio_tcp_request_thread, req) < 0) {
+			RIO_ERROR("Too many job load, please expand the thread pool size");
+			RIO_FREE_TCP_REQ_IN_OUT(req);
 		}
-		/*Detach thread*/
-		CloseHandle(thread_hdl);
 	}
 }
 
@@ -176,7 +174,7 @@ rio_after_close(rio_request_t *req) {
 }
 
 static void
-rio_on_udp_iocp(rio_request_t *req, DWORD nbytes) {
+rio_on_udp_iocp(rio_request_t *req, DWORD nbytes, rio_instance_t *instance) {
 	rio_buf_t * buf = req->in_buff;
 	WSABUF udpbuf;
 	DWORD udpflag, rc;
@@ -211,13 +209,10 @@ RIO_UDP_MODE_SWITCH_STATE:
 		req->next_state = rio_IDLE;
 		if (nbytes > 0) {
 			req->in_buff->end = req->in_buff->start + nbytes;
-			unsigned udpthreadid;
-			HANDLE udp_thread_hdl = (HANDLE)_beginthreadex(NULL, 0, rio_udp_request_thread, req, 0, &udpthreadid);
-			if (udp_thread_hdl == 0) {
-				fprintf(stderr, "Error while creating the thread: %d\n", GetLastError());
+			if (at_thpool_newtask(instance->thpool, rio_udp_request_thread, req) < 0) {
+				RIO_ERROR("Too many job load, please expand the thread pool size");
+				RIO_FREE_UDP_REQ_IN_OUT(req);
 			}
-			/*Detach thread*/
-			CloseHandle(udp_thread_hdl);
 			break;
 		}
 	case rio_DONE_WRITE:
@@ -304,7 +299,7 @@ rio_create_udp_request_event(SOCKET listenfd, HANDLE iocp_port) {
 	return req;
 }
 
-unsigned __stdcall
+void
 rio_udp_request_thread(void *arg) {
 	int rc;
 	SIZE_T out_sz;
@@ -329,10 +324,9 @@ rio_udp_request_thread(void *arg) {
 			}
 		}
 	}
-	return 0;
 }
 
-unsigned __stdcall
+void
 rio_tcp_request_thread(void *arg) {
 	rio_request_t *req = (rio_request_t*)arg;
 	req->read_handler(req);
@@ -345,7 +339,6 @@ rio_tcp_request_thread(void *arg) {
 	else {
 		rio_on_recv(req, rio_WRITABLE);
 	}
-	return 0;
 }
 
 static int
@@ -354,6 +347,7 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 	DWORD nbytes;
 	ULONG_PTR CompKey;
 	rio_request_t *p_req;
+	at_thpool_t *tp = instance->thpool;
 	//int err_retry = 30;
 
 	for (;;) {
@@ -383,7 +377,7 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 		}
 		else if (COMPLETION_KEY_IO == CompKey) {
 			if (p_req->isudp) {
-				rio_on_udp_iocp(p_req, nbytes);
+				rio_on_udp_iocp(p_req, nbytes, instance);
 			}
 			else {
 				switch (p_req->next_state)
@@ -392,7 +386,7 @@ rio_run_iocp_worker(rio_instance_t *instance) {
 					rio_on_recv(p_req, rio_WRITABLE);
 					break;
 				case rio_WRITABLE:
-					rio_process_and_write(p_req, nbytes);
+					rio_process_and_write(p_req, nbytes, instance);
 					break;
 				case rio_FORCE_CLOSE:
 					p_req->on_conn_close_handler(p_req);
@@ -753,7 +747,9 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 }
 
 int
-rio_start(rio_instance_t *instance) {
+rio_start(rio_instance_t *instance, unsigned int n_concurrent_threads) {
+
+	instance->thpool = at_thpool_create(n_concurrent_threads);
 	if (instance->init_handler) {
 		instance->init_handler(instance->init_arg);
 	}

@@ -2,28 +2,6 @@
 #include <string.h>
 #include "route_io.h"
 
-#define rio_check_http_header_structure(request) \
-if( (request->out_buff == NULL) || strncmp( (const char*) request->out_buff->start, "HTTP/1.1 ", 9) != 0) { \
-  fprintf(stderr, "%s\n", "Invalid Http header, no http status code on top");\
-  return -1;\
-}
-
-#if defined _WIN32 || _WIN64
-#define rio_check_http_if_content_length(request, len) \
-if(! rio_memstr( request->out_buff->start, request->out_buff->end,(char*) "Content-Length:")) { \
-char content_len_str[50]; \
-snprintf(content_len_str, 50, "Content-Length: %Iu", len); \
-rio_write_http_header_2(request, content_len_str); \
-}
-#else
-#define rio_check_http_if_content_length(request, len) \
-if(! rio_memstr( request->out_buff->start, request->out_buff->end,(char*) "Content-Length:")) { \
-char content_len_str[50]; \
-snprintf(content_len_str, 50, "Content-Length: %zu", len); \
-rio_write_http_header_2(request, content_len_str); \
-}
-#endif
-
 unsigned char*
 rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
   size_t len = end - start, ptnlen = strlen(pattern);
@@ -49,11 +27,6 @@ rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
 
 rio_bool_t
 rio_write_http_status(rio_request_t * request, int statuscode) {
-  if (request->out_buff) {
-    fprintf(stderr, "%s\n", "Invalid Http status code should be write first"); \
-    return rio_false;
-  }
-
   switch (statuscode) {
   case 100:
     rio_write_output_buffer(request, (unsigned char*)"HTTP/1.1 100 Continue");
@@ -179,7 +152,6 @@ rio_write_http_status(rio_request_t * request, int statuscode) {
 
 rio_bool_t
 rio_write_http_header(rio_request_t * request, char* key, char *val) {
-  rio_check_http_header_structure(request);
   rio_write_output_buffer(request, (unsigned char*) key);
   rio_write_output_buffer(request, (unsigned char*) ": ");
   rio_write_output_buffer(request, (unsigned char*) val);
@@ -189,7 +161,6 @@ rio_write_http_header(rio_request_t * request, char* key, char *val) {
 
 rio_bool_t
 rio_write_http_header_2(rio_request_t * request, char* keyval) {
-  rio_check_http_header_structure(request);
   rio_write_output_buffer(request, (unsigned char*) keyval);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   return rio_true;
@@ -198,7 +169,6 @@ rio_write_http_header_2(rio_request_t * request, char* keyval) {
 
 rio_bool_t
 rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len) {
-  rio_check_http_header_structure(request);
   rio_write_output_buffer_l(request, (unsigned char*) keyval, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   return rio_true;
@@ -207,9 +177,7 @@ rio_write_http_header_3(rio_request_t * request, char* keyval, size_t len) {
 rio_bool_t
 rio_write_http_content(rio_request_t * request, char* content) {
   size_t len;
-  rio_check_http_header_structure(request);
   len = strlen(content);
-  rio_check_http_if_content_length(request, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   rio_write_output_buffer_l(request, (unsigned char*) content, len);
   return rio_true;
@@ -217,8 +185,6 @@ rio_write_http_content(rio_request_t * request, char* content) {
 
 rio_bool_t
 rio_write_http_content_2(rio_request_t * request, char* content, size_t len) {
-  rio_check_http_header_structure(request);
-  rio_check_http_if_content_length(request, len);
   rio_write_output_buffer(request, (unsigned char*) "\r\n");
   rio_write_output_buffer_l(request, (unsigned char*) content, len);
   return rio_true;
@@ -227,42 +193,42 @@ rio_write_http_content_2(rio_request_t * request, char* content, size_t len) {
 rio_bool_t
 rio_http_getpath(rio_request_t *req, rio_buf_t *buf) {
   size_t buflen;
-  rio_buf_t *pbuf = req->in_buff;
+  rio_buf_t *pbuf = req->inbuf;
   if (pbuf) {
     buflen = pbuf->end - pbuf->start;
     if ( (buf->start = (unsigned char*) memchr(pbuf->start, '/', buflen) ) && (buf->end = (unsigned char*) memchr(buf->start, ' ', pbuf->end - buf->start )) ) {
-      buf->total_size = buf->end - buf->start;
+      buf->capacity = buf->end - buf->start;
       return rio_true;
     }
   }
-  buf->total_size = 0;
+  buf->capacity = 0;
   return rio_false;
 }
 
 rio_bool_t
 rio_http_getbody(rio_request_t *req, rio_buf_t *buf) {
-  rio_buf_t *pbuf = req->in_buff;
+  rio_buf_t *pbuf = req->inbuf;
   if (pbuf) {
     if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*)"\r\n\r\n")) ) {
       buf->start += 4;
       buf->end = pbuf->end;
-      buf->total_size = buf->end - buf->start;
+      buf->capacity = buf->end - buf->start;
       return rio_true;
     } else if ( (buf->start = rio_memstr(pbuf->start, pbuf->end, (char*) "\n\n") ) ) {
       buf->start += 2;
       buf->end = pbuf->end;
-      buf->total_size = buf->end - buf->start;
+      buf->capacity = buf->end - buf->start;
       return rio_true;
     }
   }
-  buf->total_size = 0;
+  buf->capacity = 0;
   return rio_false;
 }
 
 rio_bool_t
 rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
   rio_http_getpath(req, buf);
-  size_t len = buf->total_size, keylen = strlen(key);
+  size_t len = buf->capacity, keylen = strlen(key);
   unsigned char *start = buf->start, *end = buf->end;
   char deli = '?';
 
@@ -278,22 +244,22 @@ rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
             if ( (end = (unsigned char*) memchr(start, (int)deli, len) ) ) {
               buf->start = start;
               buf->end = --end;
-              buf->total_size = end - start;
+              buf->capacity = end - start;
             } else {
               buf->start = start;
-              buf->total_size = buf->end - start;
+              buf->capacity = buf->end - start;
             }
             return rio_true;
           }
           continue;
         }
         buf->start = buf->end = 0;
-        buf->total_size = 0;
+        buf->capacity = 0;
         return rio_false;
       }
     } while ( (start = (unsigned char*) memchr(start, (int)deli, len) ) );
   }
   buf->start = buf->end = 0;
-  buf->total_size = 0;
+  buf->capacity = 0;
   return rio_false;
 }

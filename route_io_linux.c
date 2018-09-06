@@ -58,6 +58,9 @@ if(req){\
 if (req->inbuf) { \
 RIO_FREE(req->inbuf); \
 } \
+if (req->udp_outbuf) { \
+RIO_FREE(req->udp_outbuf); \
+} \
 RIO_FREE(req);}
 
 typedef void (*rio_signal_handler_pt)(int);
@@ -125,37 +128,38 @@ rio_set_curr_req_read_sz(rio_request_t *req, int opt) {
 rio_state
 rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
 	int retbytes;
-	size_t outsz;
+	size_t outsz, curr_size, new_size;
+	rio_buf_t *buf;
 	if (output) {
 		outsz = RIO_STRLEN(output);
 		if (outsz == 0) {
-			return;
+			return rio_ERROR;
 		}
 		if (req->isudp) {
 			if (req->udp_outbuf == NULL) {
 				buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + outsz);
 				if (!buf) {
 					RIO_ERROR("malloc");
-					return;
+					return rio_ERROR;
 				}
 				buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
 				buf->end = ((u_char *)memcpy(buf->start, output, outsz)) + outsz;
-				buf->total_size = outsz;
+				buf->capacity = outsz;
 				req->udp_outbuf = buf;
 			}
 			else {
 				curr_size = rio_buf_size(req->udp_outbuf);
-				if ((curr_size + outsz) > req->udp_outbuf->total_size) {
+				if ((curr_size + outsz) > req->udp_outbuf->capacity) {
 					new_size = (curr_size + outsz) * 2;
 					buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + new_size);
 					if (!buf) {
 						RIO_ERROR("malloc");
-						return;
+						return rio_ERROR;
 					}
 					buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
 					buf->end = ((u_char*)memcpy(buf->start, req->udp_outbuf->start, curr_size)) + curr_size;
 					buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
-					buf->total_size = new_size;
+					buf->capacity = new_size;
 					RIO_FREE(req->udp_outbuf);
 					req->udp_outbuf = buf;
 				}
@@ -177,35 +181,37 @@ rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
 rio_state
 rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t outsz) {
 	int retbytes;
+	size_t curr_size, new_size;
+	rio_buf_t *buf;
 	if (output) {
 		if (outsz == 0) {
-			return;
+			return rio_ERROR;
 		}
 		if (req->isudp) {
 			if (req->udp_outbuf == NULL) {
 				buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + outsz);
 				if (!buf) {
 					RIO_ERROR("malloc");
-					return;
+					return rio_ERROR;
 				}
 				buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
 				buf->end = ((u_char *)memcpy(buf->start, output, outsz)) + outsz;
-				buf->total_size = outsz;
+				buf->capacity = outsz;
 				req->udp_outbuf = buf;
 			}
 			else {
 				curr_size = rio_buf_size(req->udp_outbuf);
-				if ((curr_size + outsz) > req->udp_outbuf->total_size) {
+				if ((curr_size + outsz) > req->udp_outbuf->capacity) {
 					new_size = (curr_size + outsz) * 2;
 					buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + new_size);
 					if (!buf) {
 						RIO_ERROR("malloc");
-						return;
+						return rio_ERROR;
 					}
 					buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
 					buf->end = ((u_char*)memcpy(buf->start, req->udp_outbuf->start, curr_size)) + curr_size;
 					buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
-					buf->total_size = new_size;
+					buf->capacity = new_size;
 					RIO_FREE(req->udp_outbuf);
 					req->udp_outbuf = buf;
 				}
@@ -273,7 +279,7 @@ rio_read_udp_handler_queue(void *_req) {
 	rio_request_t *req = (rio_request_t*)_req;
 	int retbytes, fd = req->sockfd;
 	rio_buf_t *inbuf = req->inbuf;
-	size_t sz_per_read = req->sz_per_read;
+	size_t sz_per_read = req->sz_per_read, output_sz;
 	while ( ( retbytes = recvfrom(fd, inbuf->start, sz_per_read, 0,
 	                              (struct sockaddr *) &req->client_addr, &req->client_addr_len) ) <= 0 ) {
 		RIO_SOCKET_CHECK_TRY(retbytes, goto READ_HANDLER, goto EXIT_REQUEST);
@@ -282,6 +288,12 @@ rio_read_udp_handler_queue(void *_req) {
 	req->inbuf = inbuf;
 READ_HANDLER:
 	req->read_handler(req);
+	if (req->udp_outbuf && (output_sz = rio_buf_size(req->udp_outbuf))) {
+		while ( ( retbytes = sendto(req->sockfd, req->udp_outbuf->start, output_sz, 0,
+		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
+			RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); goto EXIT_REQUEST, printf("%s\n", "peer closed while sending"); goto EXIT_REQUEST);
+		}
+	}
 EXIT_REQUEST:
 	RIO_FREE_REQ_ALL(req);
 }
@@ -681,6 +693,7 @@ rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 	}
 	p_req->on_conn_close_handler = on_conn_close_handler;
 	p_req->isudp = 1;
+	p_req->udp_outbuf = NULL;
 	p_req->force_close = 0;
 	p_req->sz_per_read = defSize;
 	p_req->sockfd = fd;//fcntl(fd, F_DUPFD, 0);
@@ -728,6 +741,7 @@ rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_hand
 	}
 	p_req->on_conn_close_handler = on_conn_close_handler;
 	p_req->isudp = 0;
+	p_req->udp_outbuf = NULL;
 	p_req->force_close = 0;
 	p_req->sz_per_read = defSize;
 	p_req->sockfd = fd;

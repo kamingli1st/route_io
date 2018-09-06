@@ -56,7 +56,7 @@ int main(int, char* []) {
         rio_add_udp_fd(instance, 12345, read_handler, on_conn_close_handler);
         rio_add_tcp_fd(instance, 3232, read_handler, 64, on_conn_close_handler);
 #endif
-        rio_start(instance);
+        rio_start(instance, 16);
     }
     catch (const spdlog::spdlog_ex& ex)
     {

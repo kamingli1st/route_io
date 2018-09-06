@@ -281,21 +281,21 @@ rio_read_udp_handler_queue(void *_req) {
 	rio_buf_t *inbuf = req->inbuf;
 	size_t sz_per_read = req->sz_per_read, output_sz;
 	while ( ( retbytes = recvfrom(fd, inbuf->start, sz_per_read, 0,
-	                              (struct sockaddr *) &req->client_addr, &req->client_addr_len) ) <= 0 ) {
-		RIO_SOCKET_CHECK_TRY(retbytes, goto READ_HANDLER, goto EXIT_REQUEST);
-	}
-	inbuf->end = inbuf->start + retbytes;
-	req->inbuf = inbuf;
-READ_HANDLER:
-	req->read_handler(req);
-	if (req->udp_outbuf && (output_sz = rio_buf_size(req->udp_outbuf))) {
-		while ( ( retbytes = sendto(req->sockfd, req->udp_outbuf->start, output_sz, 0,
-		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
-			RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); goto EXIT_REQUEST, printf("%s\n", "peer closed while sending"); goto EXIT_REQUEST);
+	                              (struct sockaddr *) &req->client_addr, &req->client_addr_len) ) == -1 && errno == EINTR) /*Loop till success or error*/;
+
+	if (retbytes > 0) {
+		inbuf->end = inbuf->start + retbytes;
+		req->inbuf = inbuf;
+		req->read_handler(req);
+		if (req->udp_outbuf && (output_sz = rio_buf_size(req->udp_outbuf))) {
+			while (sendto(req->sockfd, req->udp_outbuf->start, output_sz, 0,
+			              (struct sockaddr *) &req->client_addr, req->client_addr_len) == -1 && errno == EINTR) /*Loop till success or error*/;
 		}
 	}
-EXIT_REQUEST:
-	RIO_FREE_REQ_ALL(req);
+	if (req) {
+		req->on_conn_close_handler(req);
+		RIO_FREE_REQ_ALL(req);
+	}
 }
 
 void

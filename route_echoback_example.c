@@ -15,7 +15,7 @@ void init_instance(void *arg) {
 }
 
 void read_handler(rio_request_t *req) {
-	int nbytes =(int) rio_buf_size(req->inbuf);
+	int nbytes = (int)rio_buf_size(req->inbuf);
 	char terminator_char = *(req->inbuf->end - 1);
 
 	if (terminator_char == '\n') {
@@ -36,7 +36,7 @@ void on_conn_close_handler(rio_request_t *req) {
 		free(req->ctx_val);
 		req->ctx_val = NULL;
 	}
-// fprintf(stderr, "%s\n", "Connection closing");
+	// fprintf(stderr, "%s\n", "Connection closing");
 }
 
 int main(void) {
@@ -45,8 +45,8 @@ int main(void) {
 	rio_set_def_sz_per_read(512);
 
 	rio_instance_t * instance = rio_create_routing_instance(init_instance, NULL);
-	rio_add_udp_fd(instance, 12345, read_handler, on_conn_close_handler);
-	rio_add_tcp_fd(instance, 3232, read_handler, 128, on_conn_close_handler);
+	//	rio_add_udp_fd(instance, 12345, read_handler, on_conn_close_handler);
+	rio_add_tcp_fd(instance, 3232, read_handler, 1024, on_conn_close_handler);
 
 	rio_start(instance, 64);
 

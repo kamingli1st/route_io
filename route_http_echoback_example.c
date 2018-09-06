@@ -55,7 +55,7 @@ int main(void) {
   rio_add_udp_fd(instance, 12345, read_handler, on_conn_close_handler);
   rio_add_http_fd(instance, 3232, read_handler, 64, on_conn_close_handler);
 #endif
-  rio_start(instance);
+  rio_start(instance, 8);
 
   return 0;
 }

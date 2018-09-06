@@ -405,7 +405,7 @@ RIO_DEL_AND_FREE_EVENT:
 #define any_child_pid -1
 
 int
-rio_start(rio_instance_t *instance) {
+rio_start(rio_instance_t *instance, unsigned int nthreads) {
 	int r, child_status;
 	pid_t ch_pid;
 STREAM_RESTART:
@@ -430,6 +430,8 @@ STREAM_RESTART:
 			sleep(2);
 			return -1;
 		}
+
+		instance->thpool = at_thpool_create(nthreads);
 
 		if (instance->init_handler) {
 			instance->init_handler(instance->init_arg);

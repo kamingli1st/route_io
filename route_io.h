@@ -39,6 +39,7 @@ struct rio_request_s {
   struct sockaddr_in client_addr;
   socklen_t client_addr_len;
   unsigned isudp: 1;
+  rio_buf_t *udp_outbuf;
   rio_buf_t *inbuf;
   void* ctx_val;
   rio_read_handler_pt read_handler;

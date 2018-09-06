@@ -128,9 +128,47 @@ rio_write_output_buffer(rio_request_t *req, unsigned char* output) {
 	size_t outsz;
 	if (output) {
 		outsz = RIO_STRLEN(output);
-		while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
-		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
-			RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); return rio_SOCK_TIMEOUT, printf("%s\n", "peer closed while sending"); return rio_ERROR);
+		if (outsz == 0) {
+			return;
+		}
+		if (req->isudp) {
+			if (req->udp_outbuf == NULL) {
+				buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + outsz);
+				if (!buf) {
+					RIO_ERROR("malloc");
+					return;
+				}
+				buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+				buf->end = ((u_char *)memcpy(buf->start, output, outsz)) + outsz;
+				buf->total_size = outsz;
+				req->udp_outbuf = buf;
+			}
+			else {
+				curr_size = rio_buf_size(req->udp_outbuf);
+				if ((curr_size + outsz) > req->udp_outbuf->total_size) {
+					new_size = (curr_size + outsz) * 2;
+					buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + new_size);
+					if (!buf) {
+						RIO_ERROR("malloc");
+						return;
+					}
+					buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+					buf->end = ((u_char*)memcpy(buf->start, req->udp_outbuf->start, curr_size)) + curr_size;
+					buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+					buf->total_size = new_size;
+					RIO_FREE(req->udp_outbuf);
+					req->udp_outbuf = buf;
+				}
+				else {
+					buf = req->udp_outbuf;
+					buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+				}
+			}
+		} else {
+			while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
+			                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
+				RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); return rio_SOCK_TIMEOUT, printf("%s\n", "peer closed while sending"); return rio_ERROR);
+			}
 		}
 	}
 	return rio_SUCCESS;
@@ -140,9 +178,47 @@ rio_state
 rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t outsz) {
 	int retbytes;
 	if (output) {
-		while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
-		                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
-			RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); return rio_SOCK_TIMEOUT, printf("%s\n", "peer closed while sending"); return rio_ERROR);
+		if (outsz == 0) {
+			return;
+		}
+		if (req->isudp) {
+			if (req->udp_outbuf == NULL) {
+				buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + outsz);
+				if (!buf) {
+					RIO_ERROR("malloc");
+					return;
+				}
+				buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+				buf->end = ((u_char *)memcpy(buf->start, output, outsz)) + outsz;
+				buf->total_size = outsz;
+				req->udp_outbuf = buf;
+			}
+			else {
+				curr_size = rio_buf_size(req->udp_outbuf);
+				if ((curr_size + outsz) > req->udp_outbuf->total_size) {
+					new_size = (curr_size + outsz) * 2;
+					buf = (rio_buf_t*)RIO_MALLOC(sizeof(rio_buf_t) + new_size);
+					if (!buf) {
+						RIO_ERROR("malloc");
+						return;
+					}
+					buf->start = ((u_char*)buf) + sizeof(rio_buf_t);
+					buf->end = ((u_char*)memcpy(buf->start, req->udp_outbuf->start, curr_size)) + curr_size;
+					buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+					buf->total_size = new_size;
+					RIO_FREE(req->udp_outbuf);
+					req->udp_outbuf = buf;
+				}
+				else {
+					buf = req->udp_outbuf;
+					buf->end = ((u_char*)memcpy(buf->end, output, outsz)) + outsz;
+				}
+			}
+		} else {
+			while ( ( retbytes = sendto(req->sockfd, output, outsz, 0,
+			                            (struct sockaddr *) &req->client_addr, req->client_addr_len) ) <= 0 ) {
+				RIO_SOCKET_CHECK_TRY(retbytes, printf("%s\n", "timeout while sending"); return rio_SOCK_TIMEOUT, printf("%s\n", "peer closed while sending"); return rio_ERROR);
+			}
 		}
 	}
 	return rio_SUCCESS;

@@ -1,0 +1,3 @@
+[submodule "atomic_threadpool"]
+	path = atomic_threadpool
+	url = https://github.com/Taymindis/atomic_threadpool.git

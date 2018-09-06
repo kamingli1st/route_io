@@ -64,7 +64,7 @@ struct rio_instance_s {
 extern rio_state rio_write_output_buffer(rio_request_t *req, unsigned char* output);
 extern rio_state rio_write_output_buffer_l(rio_request_t *req, unsigned char* output, size_t len);
 extern rio_instance_t* rio_create_routing_instance(rio_init_handler_pt init_handler, void *arg );
-extern int rio_start(rio_instance_t *instance);
+extern int rio_start(rio_instance_t *instance, unsigned int nthreads);
 extern int rio_add_udp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler,
                           rio_on_conn_close_pt on_conn_close_handler);
 extern int rio_add_tcp_fd(rio_instance_t *instance, int port, rio_read_handler_pt read_handler, int backlog,

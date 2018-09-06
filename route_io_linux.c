@@ -17,7 +17,6 @@
 #include <sys/signalfd.h>
 #include <unistd.h>
 #include <signal.h>
-#include <pthread.h>
 #include <fcntl.h>
 #include "route_io.h"
 
@@ -94,8 +93,8 @@ static short rio_get_port_from_socket(int sock) {
 	return -1;
 }
 
-void *rio_read_udp_handler_spawn(void *req_);
-void *rio_read_tcp_handler_spawn(void *req_);
+void rio_read_udp_handler_queue(void *req_);
+void rio_read_tcp_handler_queue(void *req_);
 
 void
 rio_set_no_fork() {
@@ -193,8 +192,8 @@ rio_create_fd(u_short port, short af_family, int socket_type, int protocol, int 
 	return sockfd;
 }
 
-void *
-rio_read_udp_handler_spawn(void *_req) {
+void
+rio_read_udp_handler_queue(void *_req) {
 	rio_request_t *req = (rio_request_t*)_req;
 	int retbytes, fd = req->sockfd;
 	rio_buf_t *inbuf = req->inbuf;
@@ -209,11 +208,10 @@ READ_HANDLER:
 	req->read_handler(req);
 EXIT_REQUEST:
 	RIO_FREE_REQ_ALL(req);
-	pthread_exit(NULL);
 }
 
-void *
-rio_read_tcp_handler_spawn(void *req_) {
+void
+rio_read_tcp_handler_queue(void *req_) {
 	int retbytes;
 	rio_request_t *req = (rio_request_t*)req_;
 	rio_buf_t *inbuf = req->inbuf;
@@ -250,9 +248,7 @@ EXIT_REQUEST:
 		rio_do_close(req->sockfd);
 		RIO_FREE_REQ_ALL(req);
 	}
-	pthread_exit(NULL);
 }
-
 
 static int
 rio_do_close(int fd) {
@@ -323,14 +319,11 @@ rio_run_epoll(rio_instance_t *instance) {
 				sub_req->sockfd = fd;//fcntl(fd, F_DUPFD, 0);
 				sub_req->sz_per_read = sz_per_read;
 				sub_req->inbuf = buf;
-				pthread_t t;
-				if (pthread_create(&t, NULL, rio_read_udp_handler_spawn, sub_req)) {
+				if (at_thpool_newtask(instance->thpool, rio_read_udp_handler_queue, sub_req) < 0) {
+					RIO_ERROR("Too many job load, please expand the thread pool size");
 					RIO_FREE(sub_req->inbuf);
 					RIO_FREE(sub_req);
-					RIO_ERROR("Error creating thread\n");
-					return -1;
 				}
-				pthread_detach(t);
 			} else {
 				// if inbuf is null, means is master request, accept new connection
 				if ( main_req->inbuf == NULL) {
@@ -376,14 +369,11 @@ rio_run_epoll(rio_instance_t *instance) {
 						RIO_ERROR("error delete_to_epoll_fd");
 					}
 					instance->nevents--;
-					pthread_t t;
-					if (pthread_create(&t, NULL, rio_read_tcp_handler_spawn, main_req)) {
-						RIO_ERROR("Error creating thread\n");
+					if (at_thpool_newtask(instance->thpool, rio_read_tcp_handler_queue, main_req) < 0) {
+						fprintf(stderr, "%s\n", "Error Running on thread pool");
 						rio_do_close(main_req->sockfd);
 						RIO_FREE_REQ_ALL(main_req);
 					}
-					pthread_detach(t);
-
 					continue;
 				}
 			}

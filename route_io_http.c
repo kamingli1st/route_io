@@ -30,7 +30,7 @@ rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
   if (len) {
     while ( (start =
                (unsigned char*) memchr(start,
-                                       (int)pattern[0],
+                                       (intptr_t)pattern[0],
                                        len) ) ) {
       len = end - start;
       if (len >= ptnlen) {
@@ -48,7 +48,7 @@ rio_memstr(unsigned char * start, unsigned char *end, char *pattern) {
 }
 
 rio_bool_t
-rio_write_http_status(rio_request_t * request, int statuscode) {
+rio_write_http_status(rio_request_t * request, intptr_t statuscode) {
   if (request->out_buff) {
     fprintf(stderr, "%s\n", "Invalid Http status code should be write first"); \
     return rio_false;
@@ -266,7 +266,7 @@ rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
   unsigned char *start = buf->start, *end = buf->end;
   char deli = '?';
 
-  if (len && (start = (unsigned char*) memchr(start, (int)deli, len) ) ) {
+  if (len && (start = (unsigned char*) memchr(start, (intptr_t)deli, len) ) ) {
     deli = '&';
     do {
       if (end != start) {
@@ -275,7 +275,7 @@ rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
         if (len >= keylen) {
           if ( memcmp(start, key, keylen) == 0) {
             start += keylen;
-            if ( (end = (unsigned char*) memchr(start, (int)deli, len) ) ) {
+            if ( (end = (unsigned char*) memchr(start, (intptr_t)deli, len) ) ) {
               buf->start = start;
               buf->end = --end;
               buf->capacity = end - start;
@@ -291,7 +291,7 @@ rio_http_get_queryparam(rio_request_t *req, char *key, rio_buf_t *buf) {
         buf->capacity = 0;
         return rio_false;
       }
-    } while ( (start = (unsigned char*) memchr(start, (int)deli, len) ) );
+    } while ( (start = (unsigned char*) memchr(start, (intptr_t)deli, len) ) );
   }
   buf->start = buf->end = 0;
   buf->capacity = 0;
